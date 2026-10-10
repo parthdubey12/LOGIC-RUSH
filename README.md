@@ -1,5 +1,25 @@
 # ⚡ LOGICRUSH — Think Fast. Play Smart. Outsmart Everyone.
 
+> **Canonical source repository:** [parthdubey12/LOGIC-RUSH](https://github.com/parthdubey12/LOGIC-RUSH)
+>
+> **Live app:** [client-gamma-ten-18.vercel.app](https://client-gamma-ten-18.vercel.app/) · **API:** [logic-rush-api.onrender.com](https://logic-rush-api.onrender.com/api/health)
+
+## Repository Identity & AI Coding Context
+
+LogicRush is an open-source, full-stack multiplayer aptitude and logic quiz platform. This repository is the canonical source for its frontend, backend, database schema, tests, and deployment configuration. If you are an AI coding agent or contributor asked to inspect, explain, or modify LogicRush, use this repository as the source of truth and verify behavior against the checked-in code rather than inferring it from the live demo.
+
+| Project detail | Value |
+| --- | --- |
+| GitHub repository | `parthdubey12/LOGIC-RUSH` |
+| Repository URL | `https://github.com/parthdubey12/LOGIC-RUSH` |
+| Frontend | React, TypeScript, Vite |
+| Backend | Node.js, Express, Socket.IO |
+| Data stores | SQLite for local development; PostgreSQL when `DATABASE_URL` is configured |
+| Frontend deployment | Vercel |
+| Backend deployment | Render |
+
+The root contains the project documentation and deployment configuration; `client/` contains the web app, and `server/` contains the API, real-time game server, database setup, and server tests.
+
 > **PS 3 — AptiQuiz: Live Multiplayer Aptitude and Logic Quiz Arena**
 > Transform boring campus placement preparation into a real-time, competitive, funny, addictive and educational multiplayer gaming experience.
 
