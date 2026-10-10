@@ -3,6 +3,8 @@
 > **Canonical source repository:** [parthdubey12/LOGIC-RUSH](https://github.com/parthdubey12/LOGIC-RUSH)
 >
 > **Live app:** [client-gamma-ten-18.vercel.app](https://client-gamma-ten-18.vercel.app/) · **API:** [logic-rush-api.onrender.com](https://logic-rush-api.onrender.com/api/health)
+>
+> [![CI](https://github.com/parthdubey12/LOGIC-RUSH/actions/workflows/ci.yml/badge.svg)](https://github.com/parthdubey12/LOGIC-RUSH/actions/workflows/ci.yml)
 
 ## Repository Identity & AI Coding Context
 
@@ -193,6 +195,7 @@ Covering all topics tested by TCS, Infosys, Wipro, Amazon, and GATE:
 1. **Scoring and socket tests:** `npm test` in `server/`.
 2. **50-player end-to-end simulation:** `npm run simulate-50` provisions 50 signed-in test identities, joins them to one live room, has each answer three rounds, verifies 50 distinct final leaderboard entries, and removes its temporary room/accounts afterward. The local run for this change completed successfully.
 3. **Frontend verification:** `npx tsc --noEmit` and `npx vite build` in `client/` both pass. Vite reports the existing large JavaScript chunk warning; it does not fail the build.
+4. **Continuous integration:** GitHub Actions runs the server test suite and client production build on pushes and pull requests targeting `main`. Check the badge above for the latest result.
 
 ---
 
