@@ -39,6 +39,8 @@ The React/Vite client can be deployed to Vercel with the project root set to `cl
 
 The Express API and Socket.IO game server require a persistent Node.js host; Socket.IO multiplayer is not supported by Vercel serverless functions. Deploy `server` on a WebSocket-capable host with a persistent PostgreSQL database. Set `NODE_ENV=production`, `DATABASE_URL`, a unique high-entropy `JWT_SECRET`, and `CLIENT_URL` (the exact Vercel frontend origin) on the backend. The active multiplayer rooms are held in server memory, so run one backend instance unless a shared Socket.IO adapter and shared game-state store are added.
 
+This repository includes a Render Blueprint (`render.yaml`) that provisions a free web service and PostgreSQL database for temporary testing. Render's free web service sleeps after 15 minutes without traffic, and its free PostgreSQL database expires after 30 days; export or migrate its data before then.
+
 Configure these Vercel environment variables for the client, then redeploy the frontend:
 
 - `VITE_API_URL`: backend URL ending in `/api` (for example `https://api.example.com/api`)
