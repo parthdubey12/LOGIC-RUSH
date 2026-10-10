@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { sound } from '../services/audio';
 import {
-  Zap,
   Brain,
   BarChart3,
   Trophy,
@@ -39,19 +38,16 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onOpenA
         <div 
           onClick={() => onNavigate(isAuthenticated ? 'dashboard' : 'landing')}
           className="flex items-center gap-2.5 cursor-pointer group select-none"
+          aria-label="LogicRush home"
         >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-violet to-brand-cyan flex items-center justify-center shadow-lg shadow-purple-500/20 group-hover:scale-105 transition-transform">
-            <Zap className="w-6 h-6 text-white fill-white" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="font-extrabold text-xl tracking-tight text-white font-['Outfit']">LOGIC<span className="text-brand-cyan">RUSH</span></span>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-brand-violet/20 text-brand-violet border border-brand-violet/30">
-                LIVE
-              </span>
-            </div>
-            <p className="text-[10px] text-slate-400 font-medium hidden sm:block">Think Fast. Play Smart.</p>
-          </div>
+          <img
+            src="/logicrush-logo-dark.png"
+            alt="LogicRush"
+            className="h-12 w-auto transition-transform group-hover:scale-[1.03] sm:h-14"
+          />
+          <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-brand-violet/20 text-brand-violet border border-brand-violet/30">
+            LIVE
+          </span>
         </div>
 
         {/* Navigation Items */}
