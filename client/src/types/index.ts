@@ -102,6 +102,7 @@ export interface LeaderboardEntry {
   lastPoints?: number;
   lastResponseTimeMs?: number;
   isCorrectThisRound?: boolean;
+  isDisqualified?: boolean;
   accuracy?: number;
   xpEarned?: number;
 }
