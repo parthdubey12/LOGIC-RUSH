@@ -89,6 +89,19 @@ export interface Room {
   totalPlayers?: number;
 }
 
+export interface RoomAttempt {
+  user_id: string;
+  name: string | null;
+  college: string | null;
+  score: number;
+  correct_count: number;
+  total_questions: number;
+  rank: number;
+  status: 'in_progress' | 'completed' | 'incomplete' | 'joined';
+  joined_at: string;
+  completed_at: string | null;
+}
+
 export interface LeaderboardEntry {
   rank: number;
   userId: string;

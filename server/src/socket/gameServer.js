@@ -165,6 +165,10 @@ export function setupGameSocket(io) {
       if (room.hostSocketId !== socket.id && room.hostId !== currentUserId) {
         return socket.emit('error_message', { message: 'Only the room host can start the game.' });
       }
+      if (room.status !== 'waiting') {
+        return socket.emit('error_message', { message: 'This room is not waiting for a quiz to start.' });
+      }
+      room.status = 'starting';
 
       // Fetch randomized questions for this match
       let matchQuestions = [];
@@ -215,7 +219,6 @@ export function setupGameSocket(io) {
 
       room.questions = matchQuestions;
       room.currentQuestionIndex = 0;
-      room.status = 'active';
 
       // Reset players scores & state for new match
       room.players.forEach(p => {
@@ -227,6 +230,26 @@ export function setupGameSocket(io) {
         p.powerups = { fiftyFifty: 1, doublePoints: 1, extraTime: 1, hintCard: 1, streakShield: 1 };
       });
 
+      try {
+        for (const player of room.players.values()) {
+          if (player.isHost || player.isSpectator) continue;
+          await query(
+            `INSERT INTO room_attempts (room_id, user_id, score, correct_count, total_questions, rank, status, joined_at, completed_at)
+             VALUES ($1, $2, 0, 0, $3, 0, 'in_progress', CURRENT_TIMESTAMP, NULL)
+             ON CONFLICT (room_id, user_id) DO UPDATE SET
+               score = 0, correct_count = 0, total_questions = $4, rank = 0,
+               status = 'in_progress', joined_at = CURRENT_TIMESTAMP, completed_at = NULL`,
+            [room.id, player.userId, room.questions.length, room.questions.length]
+          );
+        }
+      } catch (err) {
+        console.error('Failed to record room attempts:', err);
+        room.status = 'waiting';
+        socket.emit('error_message', { message: 'Could not start the quiz because attempts could not be recorded.' });
+        return;
+      }
+
+      room.status = 'active';
       io.to(currentRoomCode).emit('game_starting', {
         countdownSec: 3,
         totalQuestions: room.questions.length
@@ -568,9 +591,10 @@ async function endQuestionRound(io, room) {
  * Finishes the match, produces final podium, awards XP to participants
  */
 async function finishGame(io, room) {
+  if (room.status === 'finished') return;
   room.status = 'finished';
 
-  const nonSpectators = Array.from(room.players.values()).filter(p => !p.isSpectator);
+  const nonSpectators = Array.from(room.players.values()).filter(p => !p.isSpectator && !p.isHost);
   const finalLeaderboard = [...nonSpectators].sort((a, b) => b.score - a.score).map((p, rank) => ({
     rank: rank + 1,
     userId: p.userId,
@@ -586,6 +610,27 @@ async function finishGame(io, room) {
   }));
 
   const podium = finalLeaderboard.slice(0, 3);
+
+  try {
+    await query(
+      `UPDATE room_attempts SET status = 'incomplete' WHERE room_id = $1 AND status = 'in_progress'`,
+      [room.id]
+    );
+    for (const entry of finalLeaderboard) {
+      await query(
+        `UPDATE room_attempts
+         SET score = $1, correct_count = $2, total_questions = $3, rank = $4,
+             status = 'completed', completed_at = CURRENT_TIMESTAMP
+         WHERE room_id = $5 AND user_id = $6`,
+        [entry.score, entry.correctCount, room.questions.length, entry.rank, room.id, entry.userId]
+      );
+    }
+  } catch (err) {
+    console.error('Failed to persist final room results:', err);
+    if (room.hostSocketId) {
+      io.to(room.hostSocketId).emit('error_message', { message: 'Quiz finished, but student results could not be saved.' });
+    }
+  }
 
   io.to(room.code).emit('game_finished', {
     podium,

@@ -179,6 +179,21 @@ export async function initDb() {
     joined_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
 
+  await runAsync(`CREATE TABLE IF NOT EXISTS room_attempts (
+    room_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    score INTEGER NOT NULL DEFAULT 0,
+    correct_count INTEGER NOT NULL DEFAULT 0,
+    total_questions INTEGER NOT NULL DEFAULT 0,
+    rank INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'joined',
+    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at DATETIME,
+    PRIMARY KEY (room_id, user_id),
+    FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );`);
+
   await runAsync(`CREATE TABLE IF NOT EXISTS matches (
     id TEXT PRIMARY KEY,
     room_id TEXT,

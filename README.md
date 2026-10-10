@@ -136,6 +136,8 @@ Covering all topics tested by TCS, Infosys, Wipro, Amazon, and GATE:
 
 ### 5. Host & Faculty Management Portal
 - Create custom quiz rooms and host live sessions.
+- Copy student invitation links that take students to sign-in and join the selected room.
+- View each room's student attempts, completion status, and scores; the latest attempt per student is shown.
 - Question bank builder (Add, edit, delete, categorize).
 - Host-reviewed question authoring and management.
 - Export match results and class rankings to CSV.

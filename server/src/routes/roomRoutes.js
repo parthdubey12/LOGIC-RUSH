@@ -106,28 +106,68 @@ router.get('/my-rooms', authenticate, requireRole(['host', 'admin']), async (req
   }
 });
 
+// Get student attempts for a room owned by the authenticated host.
+router.get('/:roomId/attempts', authenticate, requireRole(['host', 'admin']), async (req, res) => {
+  try {
+    const room = await queryOne('SELECT id, host_id FROM rooms WHERE id = $1', [req.params.roomId]);
+    if (!room) {
+      return res.status(404).json({ error: 'Room not found.' });
+    }
+    if (room.host_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You do not have access to this room.' });
+    }
+
+    const attempts = await query(
+      `SELECT ra.user_id, ra.score, ra.correct_count, ra.total_questions, ra.rank,
+              ra.status, ra.joined_at, ra.completed_at, up.name, up.college
+       FROM room_attempts ra
+       LEFT JOIN user_profiles up ON ra.user_id = up.user_id
+       WHERE ra.room_id = $1
+       ORDER BY ra.rank ASC, ra.score DESC, up.name ASC`,
+      [req.params.roomId]
+    );
+    return res.json({ attempts });
+  } catch (err) {
+    console.error('Failed to fetch room attempts:', err);
+    return res.status(500).json({ error: 'Failed to fetch room attempts.' });
+  }
+});
+
 // Export Match Results to CSV
-router.get('/:roomId/export-csv', authenticate, async (req, res) => {
+router.get('/:roomId/export-csv', authenticate, requireRole(['host', 'admin']), async (req, res) => {
   try {
     const { roomId } = req.params;
     const room = await queryOne('SELECT * FROM rooms WHERE id = $1', [roomId]);
     if (!room) {
       return res.status(404).json({ error: 'Room not found.' });
     }
+    if (room.host_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You do not have access to this room.' });
+    }
 
     const participants = await query(
-      `SELECT rp.*, up.name, up.college, up.course 
-       FROM room_participants rp
-       LEFT JOIN user_profiles up ON rp.user_id = up.user_id
-       WHERE rp.room_id = $1
-       ORDER BY rp.score DESC`,
+      `SELECT ra.*, up.name, up.college, up.course
+       FROM room_attempts ra
+       LEFT JOIN user_profiles up ON ra.user_id = up.user_id
+       WHERE ra.room_id = $1
+       ORDER BY ra.rank ASC, ra.score DESC`,
       [roomId]
     );
 
-    // Format as CSV
-    let csv = 'Rank,Name,College,Course,Score,Correct Answers,Total Time (s)\n';
+    let csv = 'Rank,Name,College,Course,Score,Correct Answers,Total Questions,Status,Completed At\n';
     participants.forEach((p, idx) => {
-      csv += `${idx + 1},"${p.name || 'Anonymous'}","${p.college || 'N/A'}","${p.course || 'N/A'}",${p.score || 0},${p.correct_count || 0},${p.total_time || 0}\n`;
+      const fields = [
+        p.rank || idx + 1,
+        p.name || 'Anonymous',
+        p.college || 'N/A',
+        p.course || 'N/A',
+        p.score || 0,
+        p.correct_count || 0,
+        p.total_questions || 0,
+        p.status,
+        p.completed_at || ''
+      ];
+      csv += `${fields.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')}\n`;
     });
 
     res.setHeader('Content-Type', 'text/csv');

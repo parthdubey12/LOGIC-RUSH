@@ -1,20 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { API_BASE_URL, api } from '../services/api';
-import { Question, Room } from '../types';
+import { api } from '../services/api';
+import { Question, Room, RoomAttempt } from '../types';
 import {
   ShieldAlert,
   Plus,
   Play,
-  FileSpreadsheet,
   Brain,
   Download,
-  Trash2,
-  Edit,
   Users,
-  Settings,
-  AlertCircle,
-  Sliders,
-  Zap
+  Copy,
+  ClipboardCheck,
+  RefreshCw
 } from 'lucide-react';
 
 interface HostPortalProps {
@@ -22,10 +18,14 @@ interface HostPortalProps {
 }
 
 export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
-  const [activeTab, setActiveTab] = useState<'rooms' | 'questions' | 'analytics'>('rooms');
+  const [activeTab, setActiveTab] = useState<'rooms' | 'attempts' | 'questions'>('rooms');
 
   const [myRooms, setMyRooms] = useState<Room[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [attempts, setAttempts] = useState<RoomAttempt[]>([]);
+  const [selectedRoomId, setSelectedRoomId] = useState('');
+  const [isLoadingAttempts, setIsLoadingAttempts] = useState(false);
+  const [copiedRoomId, setCopiedRoomId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Live Room Creation Modal State
@@ -60,7 +60,9 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
         api.getMyRooms(),
         api.getQuestions()
       ]);
-      setMyRooms(roomsRes.rooms || []);
+      const rooms = roomsRes.rooms || [];
+      setMyRooms(rooms);
+      setSelectedRoomId((currentRoomId) => currentRoomId || rooms[0]?.id || '');
       setQuestions(qsRes.questions || []);
     } catch (err) {
       console.warn('Failed to load host data:', err);
@@ -110,8 +112,59 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
     }
   };
 
-  const handleExportCsv = (roomId: string) => {
-    window.open(`${API_BASE_URL}/rooms/${roomId}/export-csv`, '_blank');
+  useEffect(() => {
+    if (activeTab !== 'attempts' || !selectedRoomId) return;
+    setIsLoadingAttempts(true);
+    api.getRoomAttempts(selectedRoomId)
+      .then((data) => setAttempts(data.attempts || []))
+      .catch((err) => {
+        console.error('Failed to load quiz attempts:', err);
+        setBannerMessage({ type: 'error', text: err.message || 'Failed to load quiz attempts.' });
+      })
+      .finally(() => setIsLoadingAttempts(false));
+  }, [activeTab, selectedRoomId]);
+
+  const handleCopyInviteLink = async (room: Room) => {
+    const inviteUrl = new URL(window.location.origin);
+    inviteUrl.searchParams.set('room', room.code);
+    try {
+      await navigator.clipboard.writeText(inviteUrl.toString());
+      setCopiedRoomId(room.id);
+      setBannerMessage({ type: 'success', text: 'Student quiz link copied to clipboard.' });
+      window.setTimeout(() => setCopiedRoomId(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy quiz invite link:', err);
+      setBannerMessage({ type: 'error', text: 'Could not copy the invite link. Check browser clipboard permissions.' });
+    }
+  };
+
+  const handleExportCsv = async (room: Room) => {
+    try {
+      const csv = await api.exportRoomResults(room.id);
+      const url = URL.createObjectURL(csv);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `LogicRush_Room_${room.code}_Results.csv`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      console.error('Failed to export room results:', err);
+      setBannerMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to export CSV results.' });
+    }
+  };
+
+  const handleRefreshAttempts = async () => {
+    if (!selectedRoomId) return;
+    setIsLoadingAttempts(true);
+    try {
+      const data = await api.getRoomAttempts(selectedRoomId);
+      setAttempts(data.attempts || []);
+    } catch (err) {
+      console.error('Failed to refresh quiz attempts:', err);
+      setBannerMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to refresh attempts.' });
+    } finally {
+      setIsLoadingAttempts(false);
+    }
   };
 
   return (
@@ -149,9 +202,9 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
       {/* Navigation Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
         {[
-          { id: 'rooms', name: 'My Quiz Rooms & CSV Exports', icon: Users },
-          { id: 'questions', name: 'Question Bank & Authoring', icon: Brain },
-          { id: 'analytics', name: 'Class Analytics & Missed Questions', icon: FileSpreadsheet }
+          { id: 'rooms', name: 'Quiz Rooms & Student Links', icon: Users },
+          { id: 'attempts', name: 'Attempts & Scores', icon: ClipboardCheck },
+          { id: 'questions', name: 'Question Bank & Authoring', icon: Brain }
         ].map(tab => {
           const Icon = tab.icon;
           const isSelected = activeTab === tab.id;
@@ -159,7 +212,7 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => setActiveTab(tab.id as 'rooms' | 'attempts' | 'questions')}
               className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-2 border ${
                 isSelected
                   ? 'bg-emerald-600 text-white border-emerald-400 shadow-md shadow-emerald-500/10'
@@ -335,7 +388,16 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
 
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => handleExportCsv(room.id)}
+                        onClick={() => handleCopyInviteLink(room)}
+                        className="px-3.5 py-2 rounded-xl bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 text-xs font-bold border border-emerald-700 flex items-center gap-1.5 transition-colors"
+                      >
+                        {copiedRoomId === room.id
+                          ? <ClipboardCheck className="w-3.5 h-3.5" />
+                          : <Copy className="w-3.5 h-3.5" />}
+                        {copiedRoomId === room.id ? 'Link Copied' : 'Copy Student Link'}
+                      </button>
+                      <button
+                        onClick={() => handleExportCsv(room)}
                         className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 flex items-center gap-1.5 transition-colors"
                       >
                         <Download className="w-3.5 h-3.5 text-emerald-400" />
@@ -491,28 +553,75 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
         </div>
       )}
 
-      {/* TAB 3: CLASS ANALYTICS & FAILED QUESTIONS */}
-      {activeTab === 'analytics' && (
-        <div className="glass-panel rounded-3xl p-6 bg-slate-900/90 border border-slate-800 space-y-6">
-          <h3 className="text-base font-bold text-white flex items-center gap-2">
-            <FileSpreadsheet className="w-5 h-5 text-emerald-400" />
-            Class Analytics & Questions Most Frequently Missed
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-center">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Class Avg Accuracy</span>
-              <span className="text-2xl font-black font-mono text-emerald-400">76.4%</span>
+      {/* TAB 3: STUDENT ATTEMPTS & SCORES */}
+      {activeTab === 'attempts' && (
+        <div className="glass-panel rounded-3xl p-6 bg-slate-900/90 border border-slate-800 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <ClipboardCheck className="w-5 h-5 text-emerald-400" />
+                Student Attempts & Scores
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">See who started and completed each hosted quiz.</p>
             </div>
-            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-center">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Fastest Topic</span>
-              <span className="text-2xl font-black font-mono text-cyan-400">Coding-Decoding</span>
-            </div>
-            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-center">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Hardest Topic</span>
-              <span className="text-2xl font-black font-mono text-rose-400">Time, Speed, Distance</span>
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedRoomId}
+                onChange={(event) => setSelectedRoomId(event.target.value)}
+                className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+              >
+                {myRooms.map((room) => (
+                  <option key={room.id} value={room.id}>{room.title} ({room.code})</option>
+                ))}
+              </select>
+              <button
+                onClick={handleRefreshAttempts}
+                disabled={!selectedRoomId || isLoadingAttempts}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40"
+                aria-label="Refresh attempts"
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoadingAttempts ? 'animate-spin' : ''}`} />
+              </button>
             </div>
           </div>
+
+          {isLoadingAttempts ? (
+            <p className="py-10 text-center text-sm text-slate-400">Loading student attempts…</p>
+          ) : attempts.length === 0 ? (
+            <p className="py-10 text-center text-sm text-slate-400">
+              {selectedRoomId ? 'No students have started this quiz yet.' : 'Create a room to start collecting quiz attempts.'}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="text-slate-400 border-b border-slate-800">
+                  <tr>
+                    <th className="py-3 pr-4">Student</th>
+                    <th className="py-3 px-4">Score</th>
+                    <th className="py-3 px-4">Correct</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 pl-4">Completed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attempts.map((attempt) => (
+                    <tr key={attempt.user_id} className="border-b border-slate-800/70 text-slate-200">
+                      <td className="py-3 pr-4">
+                        <span className="font-bold text-white">{attempt.name || 'Student'}</span>
+                        <span className="block text-[10px] text-slate-500">{attempt.college || 'College not provided'}</span>
+                      </td>
+                      <td className="py-3 px-4 font-mono font-bold text-emerald-300">{attempt.score}</td>
+                      <td className="py-3 px-4">{attempt.correct_count} / {attempt.total_questions}</td>
+                      <td className="py-3 px-4 capitalize">{attempt.status.replace('_', ' ')}</td>
+                      <td className="py-3 pl-4 text-slate-400">
+                        {attempt.completed_at ? new Date(attempt.completed_at).toLocaleString() : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

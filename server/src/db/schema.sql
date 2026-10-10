@@ -121,6 +121,20 @@ CREATE TABLE IF NOT EXISTS room_participants (
   joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Latest attempt by each student in a host-created room
+CREATE TABLE IF NOT EXISTS room_attempts (
+  room_id VARCHAR(64) REFERENCES rooms(id) ON DELETE CASCADE,
+  user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
+  score INTEGER NOT NULL DEFAULT 0,
+  correct_count INTEGER NOT NULL DEFAULT 0,
+  total_questions INTEGER NOT NULL DEFAULT 0,
+  rank INTEGER NOT NULL DEFAULT 0,
+  status VARCHAR(32) NOT NULL DEFAULT 'joined',
+  joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  completed_at TIMESTAMP WITH TIME ZONE,
+  PRIMARY KEY (room_id, user_id)
+);
+
 -- Matches History
 CREATE TABLE IF NOT EXISTS matches (
   id VARCHAR(64) PRIMARY KEY,

@@ -95,6 +95,26 @@ export const api = {
     return res.json();
   },
 
+  async getRoomAttempts(roomId: string) {
+    const res = await fetch(`${API_BASE_URL}/rooms/${roomId}/attempts`, {
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to fetch room attempts.');
+    return data;
+  },
+
+  async exportRoomResults(roomId: string) {
+    const res = await fetch(`${API_BASE_URL}/rooms/${roomId}/export-csv`, {
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Failed to export room results.');
+    }
+    return res.blob();
+  },
+
   // Analytics & Weakness
   async getMyAnalytics() {
     const res = await fetch(`${API_BASE_URL}/analytics/my-stats`, {

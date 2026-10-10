@@ -21,13 +21,18 @@ import { SocialLeaguesView } from './components/SocialLeaguesView';
 import { SoloPracticeModal } from './components/SoloPracticeModal';
 
 export const App: React.FC = () => {
-  const { user, profile, isAuthenticated, isHost } = useAuth();
+  const { user, profile, isAuthenticated, isHost, isLoading } = useAuth();
   const socket = getSocket();
 
   // Navigation State
   const [currentView, setCurrentView] = useState<string>('landing');
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
   const [authDefaultRole, setAuthDefaultRole] = useState<'student' | 'host'>('student');
+  const [inviteAuthPrompted, setInviteAuthPrompted] = useState(false);
+  const [pendingRoomCode, setPendingRoomCode] = useState<string | null>(() => {
+    const roomCode = new URLSearchParams(window.location.search).get('room');
+    return roomCode?.trim().toUpperCase() || null;
+  });
 
   // Student Custom Quiz Modal State
   const [customQuizModalOpen, setCustomQuizModalOpen] = useState<boolean>(false);
@@ -56,6 +61,26 @@ export const App: React.FC = () => {
       setCurrentView('dashboard');
     }
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!pendingRoomCode) return;
+    if (!isAuthenticated) {
+      if (!isLoading && !inviteAuthPrompted) {
+        setAuthDefaultRole('student');
+        setAuthModalOpen(true);
+        setInviteAuthPrompted(true);
+      }
+      return;
+    }
+
+    window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+    setPendingRoomCode(null);
+    if (isHost) {
+      setCurrentView('host_portal');
+      return;
+    }
+    socket.emit('join_room', { roomCode: pendingRoomCode, isSpectator: false });
+  }, [pendingRoomCode, isAuthenticated, isHost, isLoading, inviteAuthPrompted, socket]);
 
   // Socket.IO Multiplayer Lifecycle Listeners
   useEffect(() => {
@@ -301,7 +326,7 @@ export const App: React.FC = () => {
         )}
 
         {/* Student Dashboard */}
-        {currentView === 'dashboard' && (
+        {currentView === 'dashboard' && !isHost && (
           <StudentDashboard
             onQuickPlay={handleQuickPlay}
             onJoinRoom={(code) => handleJoinRoom(code)}
@@ -367,7 +392,7 @@ export const App: React.FC = () => {
         )}
 
         {/* Host Portal */}
-        {currentView === 'host_portal' && (
+        {(currentView === 'host_portal' || (currentView === 'dashboard' && isHost)) && (
           <HostPortal
             onCreateLiveRoom={(config) => handleCreateMultiplayerRoom(config)}
           />
