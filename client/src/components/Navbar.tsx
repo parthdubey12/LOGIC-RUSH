@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { sound } from '../services/audio';
 import {
@@ -12,7 +12,8 @@ import {
   User as UserIcon,
   Sparkles,
   Flame,
-  LayoutDashboard
+  LayoutDashboard,
+  Settings
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -24,6 +25,19 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onOpenAuth }) => {
   const { user, profile, isAuthenticated, isHost, logout } = useAuth();
   const [isMuted, setIsMuted] = useState(sound.getIsMuted());
+  const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
+  const [largeText, setLargeText] = useState(() => localStorage.getItem('logicrush_large_text') === 'true');
+  const [colorSafe, setColorSafe] = useState(() => localStorage.getItem('logicrush_color_safe') === 'true');
+  const [lowData, setLowData] = useState(() => localStorage.getItem('logicrush_low_data') === 'true');
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('large-text', largeText);
+    document.documentElement.classList.toggle('color-safe', colorSafe);
+    document.documentElement.classList.toggle('low-data', lowData);
+    localStorage.setItem('logicrush_large_text', String(largeText));
+    localStorage.setItem('logicrush_color_safe', String(colorSafe));
+    localStorage.setItem('logicrush_low_data', String(lowData));
+  }, [largeText, colorSafe, lowData]);
 
   const handleToggleSound = () => {
     const muted = sound.toggleMute();
@@ -143,7 +157,37 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, onNavigate, onOpenA
 
         {/* Right Controls: Sound, Profile & Actions */}
         <div className="flex items-center gap-3">
-          
+
+          <div className="relative">
+            <button
+              onClick={() => setIsPreferencesOpen(open => !open)}
+              title="Accessibility and data preferences"
+              aria-label="Accessibility and data preferences"
+              aria-expanded={isPreferencesOpen}
+              className="p-2 rounded-lg bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-700/80 border border-slate-700"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+            {isPreferencesOpen && (
+              <div className="absolute right-0 top-12 z-50 w-64 rounded-2xl border border-slate-700 bg-slate-950 p-4 shadow-2xl space-y-3">
+                <p className="text-xs font-bold uppercase text-slate-300">Accessibility</p>
+                <label className="flex items-center gap-2 text-xs text-slate-200">
+                  <input type="checkbox" checked={largeText} onChange={event => setLargeText(event.target.checked)} className="accent-cyan-500" />
+                  Larger text
+                </label>
+                <label className="flex items-center gap-2 text-xs text-slate-200">
+                  <input type="checkbox" checked={colorSafe} onChange={event => setColorSafe(event.target.checked)} className="accent-cyan-500" />
+                  Colour-blind-safe contrast
+                </label>
+                <label className="flex items-center gap-2 text-xs text-slate-200">
+                  <input type="checkbox" checked={lowData} onChange={event => setLowData(event.target.checked)} className="accent-cyan-500" />
+                  Low-data mode (hide question images)
+                </label>
+                <p className="text-[10px] leading-relaxed text-slate-500">Preferences are saved on this device. Sound can be toggled separately.</p>
+              </div>
+            )}
+          </div>
+
           {/* Sound Toggle */}
           <button
             onClick={handleToggleSound}

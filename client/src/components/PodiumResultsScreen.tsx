@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { LeaderboardEntry } from '../types';
+import { LeaderboardEntry, TeamLeaderboardEntry } from '../types';
 import { sound } from '../services/audio';
 import {
   Trophy,
@@ -19,6 +19,7 @@ import {
 interface PodiumResultsScreenProps {
   podium: LeaderboardEntry[];
   leaderboard: LeaderboardEntry[];
+  teamLeaderboard?: TeamLeaderboardEntry[];
   totalQuestions: number;
   topic?: string;
   roomTitle?: string;
@@ -30,6 +31,7 @@ interface PodiumResultsScreenProps {
 export const PodiumResultsScreen: React.FC<PodiumResultsScreenProps> = ({
   podium,
   leaderboard,
+  teamLeaderboard = [],
   totalQuestions,
   topic,
   roomTitle,
@@ -88,6 +90,20 @@ export const PodiumResultsScreen: React.FC<PodiumResultsScreenProps> = ({
       </div>
 
       {/* 3-Tier Esports Podium Stand */}
+      {teamLeaderboard.length > 0 && (
+        <section className="glass-panel rounded-3xl p-5 bg-slate-900/90 border border-cyan-500/30">
+          <h3 className="text-lg font-bold text-white mb-3">Team Battle · Combined Scores</h3>
+          <ol className="space-y-2">
+            {teamLeaderboard.map((team) => (
+              <li key={team.teamId} className="flex items-center justify-between rounded-xl bg-slate-950 px-4 py-3 text-sm">
+                <span className="font-bold text-white">#{team.rank} · {team.name} <span className="text-xs text-slate-400">({team.memberCount} players)</span></span>
+                <span className="font-mono font-black text-cyan-300">{team.score.toLocaleString()} pts</span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
       <div className="grid grid-cols-3 gap-3 sm:gap-6 max-w-2xl mx-auto items-end pt-8">
         
         {/* 2nd Place */}

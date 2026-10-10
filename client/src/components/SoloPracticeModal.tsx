@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Question } from '../types';
 import { sound } from '../services/audio';
+import { api } from '../services/api';
 import {
   X,
   Zap,
@@ -24,11 +25,13 @@ interface SoloPracticeModalProps {
   onClose: () => void;
   questions: Question[];
   title?: string;
+  dailyChallengeId?: string | null;
+  practiceSessionId?: string | null;
 }
 
 // Local helper to jumble options
 function jumbleOptions(options: string[], correctIndex: number) {
-  if (!options || !Array.isArray(options)) return { shuffledOptions: [], newCorrectIndex: 0 };
+  if (!options || !Array.isArray(options)) return { shuffledOptions: [], newCorrectIndex: 0, originalIndices: [] };
   const indexed = options.map((opt, i) => ({ text: opt, originalIndex: i }));
   for (let i = indexed.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -36,7 +39,8 @@ function jumbleOptions(options: string[], correctIndex: number) {
   }
   return {
     shuffledOptions: indexed.map(item => item.text),
-    newCorrectIndex: indexed.findIndex(item => item.originalIndex === correctIndex)
+    newCorrectIndex: indexed.findIndex(item => item.originalIndex === correctIndex),
+    originalIndices: indexed.map(item => item.originalIndex)
   };
 }
 
@@ -44,7 +48,9 @@ export const SoloPracticeModal: React.FC<SoloPracticeModalProps> = ({
   isOpen,
   onClose,
   questions,
-  title = 'Solo Practice Drill'
+  title = 'Solo Practice Drill',
+  dailyChallengeId = null,
+  practiceSessionId = null
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
@@ -52,6 +58,10 @@ export const SoloPracticeModal: React.FC<SoloPracticeModalProps> = ({
   const [score, setScore] = useState(0);
   const [correctCount, setCorrectCount] = useState(0);
   const [isFinished, setIsFinished] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState('');
+  const [dailyResult, setDailyResult] = useState<{ xpGained: number; streak: number } | null>(null);
+  const [answerExplanation, setAnswerExplanation] = useState('');
 
   // Proctoring & Anti-Cheat State
   const [tabViolations, setTabViolations] = useState(0);
@@ -61,9 +71,10 @@ export const SoloPracticeModal: React.FC<SoloPracticeModalProps> = ({
   const modalContainerRef = useRef<HTMLDivElement>(null);
 
   // Per-question jumbled options
-  const [currentJumbled, setCurrentJumbled] = useState<{ shuffledOptions: string[]; newCorrectIndex: number }>({
+  const [currentJumbled, setCurrentJumbled] = useState<{ shuffledOptions: string[]; newCorrectIndex: number; originalIndices: number[] }>({
     shuffledOptions: [],
-    newCorrectIndex: 0
+    newCorrectIndex: 0,
+    originalIndices: []
   });
 
   // Per-question timer
@@ -78,6 +89,10 @@ export const SoloPracticeModal: React.FC<SoloPracticeModalProps> = ({
       setScore(0);
       setCorrectCount(0);
       setIsFinished(false);
+      setIsSubmitting(false);
+      setSubmissionError('');
+      setDailyResult(null);
+      setAnswerExplanation('');
       setTabViolations(0);
       setShowWarningModal(false);
       setIsDisqualified(false);
@@ -90,6 +105,7 @@ export const SoloPracticeModal: React.FC<SoloPracticeModalProps> = ({
       const q = questions[currentIndex];
       const jumbled = jumbleOptions(q.options, q.correct_option ?? 0);
       setCurrentJumbled(jumbled);
+      setAnswerExplanation('');
     }
   }, [currentIndex, questions]);
 
@@ -155,8 +171,42 @@ export const SoloPracticeModal: React.FC<SoloPracticeModalProps> = ({
 
   const currentQ = questions[currentIndex];
 
-  const handleAnswer = (index: number) => {
-    if (hasAnswered) return;
+  const handleAnswer = async (index: number) => {
+    if (hasAnswered || isSubmitting) return;
+
+    setSubmissionError('');
+    if (dailyChallengeId || practiceSessionId) {
+      setIsSubmitting(true);
+      try {
+        const result = dailyChallengeId
+          ? await api.submitDailyChallengeAnswer({
+            challenge_id: dailyChallengeId,
+            question_id: currentQ.id,
+            selected_option_index: index < 0 ? -1 : currentJumbled.originalIndices[index]
+          })
+          : await api.submitPracticeAnswer(practiceSessionId!, {
+            question_id: currentQ.id,
+            selected_option_index: index < 0 ? -1 : currentJumbled.originalIndices[index]
+          });
+        const shuffledCorrectIndex = currentJumbled.originalIndices.indexOf(result.correctOptionIndex);
+        setCurrentJumbled(current => ({ ...current, newCorrectIndex: shuffledCorrectIndex }));
+        setAnswerExplanation(result.explanation || '');
+        setSelectedOption(index);
+        setHasAnswered(true);
+        if (result.isCorrect) {
+          sound.playCorrect();
+          setScore(prev => prev + 1000);
+          setCorrectCount(prev => prev + 1);
+        } else {
+          sound.playWrong();
+        }
+      } catch (err) {
+        setSubmissionError(err instanceof Error ? err.message : 'Could not submit this answer. Please retry.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
 
     setSelectedOption(index);
     setHasAnswered(true);
@@ -172,12 +222,29 @@ export const SoloPracticeModal: React.FC<SoloPracticeModalProps> = ({
     }
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentIndex + 1 < questions.length) {
       setCurrentIndex(prev => prev + 1);
       setSelectedOption(null);
       setHasAnswered(false);
     } else {
+      if (dailyChallengeId || practiceSessionId) {
+        setIsSubmitting(true);
+        setSubmissionError('');
+        try {
+          const result = dailyChallengeId
+            ? await api.completeDailyChallenge(dailyChallengeId)
+            : await api.completePracticeSession(practiceSessionId!);
+          setScore(result.score);
+          setCorrectCount(result.correctCount);
+          if (dailyChallengeId) setDailyResult({ xpGained: result.xpGained, streak: result.streak });
+        } catch (err) {
+          setSubmissionError(err instanceof Error ? err.message : 'Could not complete the daily challenge.');
+          setIsSubmitting(false);
+          return;
+        }
+        setIsSubmitting(false);
+      }
       sound.playVictory();
       setIsFinished(true);
     }
@@ -281,6 +348,8 @@ export const SoloPracticeModal: React.FC<SoloPracticeModalProps> = ({
             <h3 className="text-xl sm:text-2xl font-bold text-white leading-snug">
               {currentQ.statement}
             </h3>
+            {currentQ.image_url && <img src={currentQ.image_url} alt="Question illustration" loading="lazy" className="question-media max-h-64 max-w-full object-contain rounded-xl" />}
+            {currentQ.table_data && <pre className="overflow-x-auto rounded-xl border border-slate-700 bg-slate-950 p-4 text-sm text-slate-100">{currentQ.table_data}</pre>}
 
             {/* Jumbled Multiple Choice Options */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -298,7 +367,7 @@ export const SoloPracticeModal: React.FC<SoloPracticeModalProps> = ({
                 return (
                   <button
                     key={idx}
-                    disabled={hasAnswered}
+                    disabled={hasAnswered || isSubmitting}
                     onClick={() => handleAnswer(idx)}
                     className={`p-4 rounded-2xl border font-bold text-left transition-all flex items-center justify-between ${btnStyle}`}
                   >
@@ -323,19 +392,23 @@ export const SoloPracticeModal: React.FC<SoloPracticeModalProps> = ({
                   Step-by-Step Solution:
                 </span>
                 <p className="leading-relaxed text-slate-200">
-                  {currentQ.explanation || 'Calculated using standard aptitude ratio principles.'}
+                  {answerExplanation || currentQ.explanation || 'Calculated using standard aptitude ratio principles.'}
                 </p>
               </div>
             )}
+
+            {submissionError && <p role="alert" className="text-sm text-rose-300">{submissionError}</p>}
+            {isSubmitting && <p className="text-xs text-slate-400">Verifying answer with the server…</p>}
 
             {/* Next Button */}
             {hasAnswered && (
               <div className="flex justify-end pt-2">
                 <button
                   onClick={handleNext}
+                  disabled={isSubmitting}
                   className="px-6 py-3 rounded-xl bg-gradient-to-r from-brand-violet to-brand-cyan text-white font-bold text-xs shadow-lg shadow-purple-500/20 hover:opacity-95 transition-all flex items-center gap-2"
                 >
-                  <span>{currentIndex + 1 < questions.length ? 'Next Question' : 'Finish Practice'}</span>
+                  <span>{isSubmitting ? 'Saving…' : currentIndex + 1 < questions.length ? 'Next Question' : dailyChallengeId ? 'Complete Challenge' : 'Finish Practice'}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
@@ -371,9 +444,18 @@ export const SoloPracticeModal: React.FC<SoloPracticeModalProps> = ({
             </div>
 
             <div>
-              <h3 className="text-2xl font-black text-white font-['Outfit']">DRILL COMPLETED!</h3>
-              <p className="text-xs text-slate-400 mt-1">Great practice run. Weak point patterns updated.</p>
+              <h3 className="text-2xl font-black text-white font-['Outfit']">
+                {dailyChallengeId ? 'DAILY CHALLENGE COMPLETED!' : practiceSessionId ? 'PRACTICE SESSION COMPLETED!' : 'DRILL COMPLETED!'}
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                {dailyChallengeId ? 'Your score and streak were verified and saved by the server.' : practiceSessionId ? 'Your score was verified by the server.' : 'Great practice run. Weak point patterns updated.'}
+              </p>
             </div>
+            {dailyResult && (
+              <p className="text-sm font-bold text-amber-200">
+                +{dailyResult.xpGained} XP · {dailyResult.streak}-day streak
+              </p>
+            )}
 
             <div className="grid grid-cols-2 gap-4 max-w-sm mx-auto">
               <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800">

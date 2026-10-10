@@ -23,6 +23,8 @@ interface MultiplayerLobbyProps {
   room: Room;
   players: RoomParticipant[];
   isHost: boolean;
+  isSpectator?: boolean;
+  spectatorsCount?: number;
   onStartGame: () => void;
   onLeaveRoom: () => void;
 }
@@ -31,6 +33,8 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
   room,
   players,
   isHost,
+  isSpectator = false,
+  spectatorsCount = 0,
   onStartGame,
   onLeaveRoom
 }) => {
@@ -108,6 +112,11 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                 Live Arena Lobby
               </span>
               <span className="text-xs text-slate-400 font-semibold">• Up to 50 Players</span>
+              {room.teamBattle && (
+                <span className="px-2.5 py-1 rounded-full bg-cyan-500/20 text-cyan-200 border border-cyan-400/40 text-xs font-bold">
+                  Team Battle
+                </span>
+              )}
             </div>
             <h2 className="text-3xl sm:text-4xl font-black text-white font-['Outfit']">
               {room.title || 'LogicRush Arena Match'}
@@ -152,7 +161,7 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                 </h3>
               </div>
               <div className="text-xs font-semibold text-purple-300">
-                {readyCount} of {players.length} Ready
+                {readyCount} of {players.length} Ready • {spectatorsCount} watching
               </div>
             </div>
 
@@ -178,6 +187,9 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                     <div className="text-[10px] text-slate-400 truncate">
                       {p.college || 'Campus Arena'}
                     </div>
+                    {room.teamBattle && (
+                      <div className="text-[10px] text-cyan-300 truncate">{p.teamName || 'Not on a team'}</div>
+                    )}
                     <div className="text-[10px] mt-0.5">
                       {p.isReady ? (
                         <span className="text-emerald-400 font-bold flex items-center gap-0.5">
@@ -192,6 +204,12 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
               ))}
             </div>
 
+            {room.teamBattle && (
+              <p className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-950/30 p-3 text-xs text-cyan-100">
+                Team battle starts when at least two teams each have 3–5 connected players. Every participant must belong to a team.
+              </p>
+            )}
+
             {/* Action Bar (Ready & Start Buttons) */}
             <div className="mt-6 pt-6 border-t border-slate-800 flex flex-wrap items-center justify-between gap-4">
               <button
@@ -202,7 +220,7 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
               </button>
 
               <div className="flex items-center gap-3">
-                {!isHost && (
+                {!isHost && !isSpectator && (
                   <button
                     onClick={handleToggleReady}
                     className={`px-6 py-3 rounded-xl font-bold text-sm shadow-lg transition-all ${
@@ -215,7 +233,7 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                   </button>
                 )}
 
-                {isHost && (
+                {isHost && !isSpectator && (
                   <button
                     onClick={onStartGame}
                     disabled={players.length === 0}
@@ -230,7 +248,7 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
           </div>
 
           {/* Host Settings Controls (Visible to Host) */}
-          {isHost && (
+          {isHost && !isSpectator && (
             <div className="glass-panel rounded-3xl p-6 bg-slate-900/80 border border-emerald-500/30">
               <div className="flex items-center gap-2 text-white font-bold text-base mb-4">
                 <Settings className="w-4 h-4 text-emerald-400" />
@@ -242,6 +260,7 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                   <label className="block text-xs font-bold text-slate-300 mb-1">Topic</label>
                   <select
                     value={topicId}
+                    disabled={Boolean(room.questionSetId)}
                     onChange={(e) => {
                       setTopicId(e.target.value);
                       handleHostSettingsUpdate({ topicId: e.target.value });
@@ -256,6 +275,7 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                     <option value="dsa">Data Structures & Algorithms</option>
                     <option value="placement">TCS & Company Placement</option>
                   </select>
+                  {room.questionSetId && <p className="mt-1 text-[10px] text-slate-500">This room uses the host's saved question set.</p>}
                 </div>
 
                 <div>

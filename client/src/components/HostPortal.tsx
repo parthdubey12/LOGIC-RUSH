@@ -17,12 +17,35 @@ interface HostPortalProps {
   onCreateLiveRoom: (config: any) => void;
 }
 
+interface HostQuestionSet {
+  id: string;
+  title: string;
+  description?: string;
+  question_count: number;
+}
+
+interface QuestionMissStat {
+  question_id: string;
+  statement: string;
+  topic_id: string;
+  correct_count: number;
+  wrong_count: number;
+  wrong_percent: number;
+}
+
 export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
   const [activeTab, setActiveTab] = useState<'rooms' | 'attempts' | 'questions'>('rooms');
 
   const [myRooms, setMyRooms] = useState<Room[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [questionSets, setQuestionSets] = useState<HostQuestionSet[]>([]);
+  const [selectedSetId, setSelectedSetId] = useState('');
+  const [setTitle, setSetTitle] = useState('');
+  const [setDescription, setSetDescription] = useState('');
+  const [setQuestionIds, setSetQuestionIds] = useState<string[]>([]);
+  const [editingSetId, setEditingSetId] = useState<string | undefined>();
   const [attempts, setAttempts] = useState<RoomAttempt[]>([]);
+  const [questionMissStats, setQuestionMissStats] = useState<QuestionMissStat[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState('');
   const [isLoadingAttempts, setIsLoadingAttempts] = useState(false);
   const [copiedRoomId, setCopiedRoomId] = useState<string | null>(null);
@@ -36,6 +59,7 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
   const [roomQCount, setRoomQCount] = useState<number>(10);
   const [roomTimeLimit, setRoomTimeLimit] = useState<number>(20);
   const [roomPowerups, setRoomPowerups] = useState<boolean>(true);
+  const [roomTeamBattle, setRoomTeamBattle] = useState(false);
 
   // New Question Form State
   const [statement, setStatement] = useState('');
@@ -45,6 +69,8 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
   const [topicId, setTopicId] = useState('percentages');
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
   const [solvingTimeSec, setSolvingTimeSec] = useState(30);
+  const [imageUrl, setImageUrl] = useState('');
+  const [tableData, setTableData] = useState('');
 
   // Status banners
   const [bannerMessage, setBannerMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -56,14 +82,16 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [roomsRes, qsRes] = await Promise.all([
+      const [roomsRes, qsRes, setsRes] = await Promise.all([
         api.getMyRooms(),
-        api.getQuestions()
+        api.getQuestionBank(),
+        api.getMyQuestionSets()
       ]);
       const rooms = roomsRes.rooms || [];
       setMyRooms(rooms);
       setSelectedRoomId((currentRoomId) => currentRoomId || rooms[0]?.id || '');
       setQuestions(qsRes.questions || []);
+      setQuestionSets(setsRes.sets || []);
     } catch (err) {
       console.warn('Failed to load host data:', err);
     } finally {
@@ -79,6 +107,8 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
       difficulty: roomDifficulty,
       question_count: roomQCount,
       time_per_question: roomTimeLimit,
+      question_set_id: selectedSetId || null,
+      team_battle: roomTeamBattle,
       powerups_enabled: roomPowerups
     });
     setIsCreatingRoom(false);
@@ -99,24 +129,83 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
         correct_option: correctOption,
         explanation,
         difficulty,
-        solving_time_sec: solvingTimeSec
+        solving_time_sec: solvingTimeSec,
+        image_url: imageUrl.trim() || null,
+        table_data: tableData.trim() || null
       });
 
       setBannerMessage({ type: 'success', text: 'Question added to question bank!' });
       setStatement('');
       setOptions(['', '', '', '']);
       setExplanation('');
+      setImageUrl('');
+      setTableData('');
       loadData();
     } catch (err) {
       setBannerMessage({ type: 'error', text: 'Failed to create question.' });
     }
   };
 
+  const handleToggleQuestionInSet = (questionId: string) => {
+    setSetQuestionIds(current => current.includes(questionId)
+      ? current.filter(id => id !== questionId)
+      : [...current, questionId]);
+  };
+
+  const handleSaveQuestionSet = async () => {
+    if (!setTitle.trim() || !setQuestionIds.length) {
+      setBannerMessage({ type: 'error', text: 'Add a title and at least one question to the set.' });
+      return;
+    }
+    try {
+      const result = await api.saveQuestionSet({
+        id: editingSetId,
+        title: setTitle.trim(),
+        description: setDescription,
+        question_ids: setQuestionIds
+      });
+      setBannerMessage({ type: 'success', text: editingSetId ? 'Question set updated.' : 'Question set created.' });
+      setEditingSetId(result.set?.id || undefined);
+      await loadData();
+    } catch (err) {
+      setBannerMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to save question set.' });
+    }
+  };
+
+  const handleEditQuestionSet = async (setId: string) => {
+    try {
+      const result = await api.getQuestionSet(setId);
+      setEditingSetId(result.set.id);
+      setSetTitle(result.set.title);
+      setSetDescription(result.set.description || '');
+      setSetQuestionIds(result.question_ids || []);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      setBannerMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to load question set.' });
+    }
+  };
+
+  const moveSetQuestion = (index: number, direction: -1 | 1) => {
+    setSetQuestionIds(current => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= current.length) return current;
+      const reordered = [...current];
+      [reordered[index], reordered[nextIndex]] = [reordered[nextIndex], reordered[index]];
+      return reordered;
+    });
+  };
+
   useEffect(() => {
     if (activeTab !== 'attempts' || !selectedRoomId) return;
     setIsLoadingAttempts(true);
-    api.getRoomAttempts(selectedRoomId)
-      .then((data) => setAttempts(data.attempts || []))
+    Promise.all([
+      api.getRoomAttempts(selectedRoomId),
+      api.getRoomQuestionAnalytics(selectedRoomId)
+    ])
+      .then(([attemptData, analyticsData]) => {
+        setAttempts(attemptData.attempts || []);
+        setQuestionMissStats(analyticsData.questions || []);
+      })
       .catch((err) => {
         console.error('Failed to load quiz attempts:', err);
         setBannerMessage({ type: 'error', text: err.message || 'Failed to load quiz attempts.' });
@@ -159,6 +248,8 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
     try {
       const data = await api.getRoomAttempts(selectedRoomId);
       setAttempts(data.attempts || []);
+      const analytics = await api.getRoomQuestionAnalytics(selectedRoomId);
+      setQuestionMissStats(analytics.questions || []);
     } catch (err) {
       console.error('Failed to refresh quiz attempts:', err);
       setBannerMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to refresh attempts.' });
@@ -261,6 +352,20 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label className="block font-bold text-slate-300 mb-1">Question Set (Optional)</label>
+                  <select
+                    value={selectedSetId}
+                    onChange={(e) => setSelectedSetId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
+                  >
+                    <option value="">Random questions by topic</option>
+                    {questionSets.map((set) => (
+                      <option key={set.id} value={set.id}>{set.title} ({set.question_count} questions)</option>
+                    ))}
+                  </select>
+                  {selectedSetId && <p className="text-[11px] text-slate-400 mt-1">Questions will follow the saved set order; the room uses up to the selected question count.</p>}
+                </div>
                 <div>
                   <label className="block font-bold text-slate-300 mb-1">Topic</label>
                   <select
@@ -332,7 +437,19 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
                   className="accent-emerald-500 w-4 h-4"
                 />
                 <label htmlFor="powerupToggle" className="font-semibold text-slate-300 cursor-pointer">
-                  Enable Tactical Power-Ups (50/50, 2X Points, Extra Time, Hint Card)
+                  Enable limited tactical power-ups (50/50, Double Points; one use each)
+                </label>
+              </div>
+              <div className="flex items-center gap-2 p-3 bg-slate-950 rounded-xl border border-slate-800">
+                <input
+                  type="checkbox"
+                  id="teamBattleToggle"
+                  checked={roomTeamBattle}
+                  onChange={(event) => setRoomTeamBattle(event.target.checked)}
+                  className="accent-emerald-500 w-4 h-4"
+                />
+                <label htmlFor="teamBattleToggle" className="font-semibold text-slate-300 cursor-pointer">
+                  Team battle (requires at least two teams with 3–5 players each)
                 </label>
               </div>
 
@@ -414,7 +531,78 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
 
       {/* TAB 2: QUESTION BANK & CREATION */}
       {activeTab === 'questions' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="space-y-6">
+          <div className="glass-panel rounded-3xl p-6 bg-slate-900/90 border border-slate-800">
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-5">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-base font-bold text-white mb-1">Reusable Question Sets</h3>
+                <p className="text-xs text-slate-400 mb-4">Select questions in order, reorder them, then save or update a set for future rooms.</p>
+                <div className="grid sm:grid-cols-2 gap-3 mb-4">
+                  <input
+                    value={setTitle}
+                    onChange={(event) => setSetTitle(event.target.value)}
+                    placeholder="Question set title"
+                    maxLength={255}
+                    className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white"
+                  />
+                  <input
+                    value={setDescription}
+                    onChange={(event) => setSetDescription(event.target.value)}
+                    placeholder="Description (optional)"
+                    maxLength={2000}
+                    className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {questionSets.map((set) => (
+                    <button
+                      key={set.id}
+                      type="button"
+                      onClick={() => { setSelectedSetId(set.id); void handleEditQuestionSet(set.id); }}
+                      className={`px-3 py-2 rounded-xl border text-xs font-bold ${editingSetId === set.id ? 'bg-emerald-900/50 border-emerald-500 text-emerald-200' : 'bg-slate-950 border-slate-700 text-slate-300'}`}
+                    >
+                      {set.title} · {set.question_count}
+                    </button>
+                  ))}
+                </div>
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {questions.map((question) => {
+                    const order = setQuestionIds.indexOf(question.id);
+                    return (
+                      <div key={question.id} className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+                        <input
+                          type="checkbox"
+                          checked={order !== -1}
+                          onChange={() => handleToggleQuestionInSet(question.id)}
+                          aria-label={`Add ${question.statement} to question set`}
+                          className="accent-emerald-500 w-4 h-4 shrink-0"
+                        />
+                        <span className="text-xs text-white flex-1">{question.statement}</span>
+                        {order !== -1 && (
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] text-emerald-300 mr-1">{order + 1}</span>
+                            <button type="button" onClick={() => moveSetQuestion(order, -1)} disabled={order === 0} className="px-2 py-1 rounded bg-slate-800 text-white disabled:opacity-30" aria-label="Move question up">↑</button>
+                            <button type="button" onClick={() => moveSetQuestion(order, 1)} disabled={order === setQuestionIds.length - 1} className="px-2 py-1 rounded bg-slate-800 text-white disabled:opacity-30" aria-label="Move question down">↓</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {!questions.length && <p className="text-xs text-slate-400">Create questions in the form below before building a set.</p>}
+                </div>
+              </div>
+              <div className="flex md:flex-col gap-2 md:w-44">
+                <button type="button" onClick={() => void handleSaveQuestionSet()} className="flex-1 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500">
+                  {editingSetId ? 'Update Set' : 'Save New Set'} ({setQuestionIds.length})
+                </button>
+                <button type="button" onClick={() => { setEditingSetId(undefined); setSetTitle(''); setSetDescription(''); setSetQuestionIds([]); }} className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold">
+                  New Set
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
           {/* Question Creation Form */}
           <div className="glass-panel rounded-3xl p-6 bg-slate-900/90 border border-slate-800">
@@ -493,6 +681,27 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
                 />
               </div>
 
+              <div>
+                <label className="block font-bold text-slate-300 mb-1">Image URL (optional)</label>
+                <input
+                  type="url"
+                  value={imageUrl}
+                  onChange={(event) => setImageUrl(event.target.value)}
+                  placeholder="https://..."
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-300 mb-1">Table Data (optional JSON)</label>
+                <textarea
+                  rows={3}
+                  value={tableData}
+                  onChange={(event) => setTableData(event.target.value)}
+                  placeholder='[["Year","Sales"],["2024","120"]]'
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white"
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-300 mb-1">Difficulty</label>
@@ -551,6 +760,7 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
           </div>
 
         </div>
+        </div>
       )}
 
       {/* TAB 3: STUDENT ATTEMPTS & SCORES */}
@@ -584,6 +794,23 @@ export const HostPortal: React.FC<HostPortalProps> = ({ onCreateLiveRoom }) => {
               </button>
             </div>
           </div>
+
+          <section className="rounded-2xl border border-amber-500/20 bg-slate-950/70 p-4">
+            <h4 className="text-sm font-bold text-amber-200 mb-2">Most-missed questions</h4>
+            {!questionMissStats.length ? (
+              <p className="text-xs text-slate-400">Question-level results appear after players answer a round.</p>
+            ) : (
+              <ol className="space-y-2">
+                {questionMissStats.slice(0, 5).map((stat, index) => (
+                  <li key={stat.question_id} className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 text-xs">
+                    <span className="text-amber-300 font-bold">#{index + 1} · {stat.wrong_percent}% incorrect</span>
+                    <span className="text-slate-200 flex-1">{stat.statement}</span>
+                    <span className="text-slate-400">{stat.wrong_count} wrong / {stat.correct_count} right</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
 
           {isLoadingAttempts ? (
             <p className="py-10 text-center text-sm text-slate-400">Loading student attempts…</p>

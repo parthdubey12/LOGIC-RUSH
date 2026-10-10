@@ -39,6 +39,8 @@ export interface Question {
   difficulty: 'easy' | 'medium' | 'hard';
   solving_time_sec?: number;
   tags?: string;
+  image_url?: string | null;
+  table_data?: string | null;
 }
 
 export interface PublicQuestion {
@@ -51,6 +53,10 @@ export interface PublicQuestion {
   difficulty: string;
   timeLimitSec: number;
   startTime: number;
+  remainingTimeMs?: number;
+  receivedAt?: number;
+  image_url?: string | null;
+  table_data?: string | null;
 }
 
 export interface RoomParticipant {
@@ -65,12 +71,12 @@ export interface RoomParticipant {
   isReady: boolean;
   isHost: boolean;
   isSpectator: boolean;
+  teamId?: string | null;
+  teamName?: string | null;
+  connected?: boolean;
   powerups?: {
     fiftyFifty: number;
     doublePoints: number;
-    extraTime: number;
-    hintCard: number;
-    streakShield: number;
   };
 }
 
@@ -84,8 +90,12 @@ export interface Room {
   max_players: number;
   question_count: number;
   time_per_question: number;
+  question_set_id?: string | null;
+  questionSetId?: string | null;
+  team_battle?: boolean;
+  teamBattle?: boolean;
   powerups_enabled: boolean;
-  status: 'waiting' | 'active' | 'finished';
+  status: 'waiting' | 'starting' | 'active' | 'question' | 'round_review' | 'finished';
   totalPlayers?: number;
 }
 
@@ -118,6 +128,14 @@ export interface LeaderboardEntry {
   isDisqualified?: boolean;
   accuracy?: number;
   xpEarned?: number;
+}
+
+export interface TeamLeaderboardEntry {
+  teamId: string;
+  name: string;
+  score: number;
+  memberCount: number;
+  rank: number;
 }
 
 export interface WeaknessDiagnostic {

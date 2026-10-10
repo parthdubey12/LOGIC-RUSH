@@ -23,13 +23,53 @@ export const SocialLeaguesView: React.FC<SocialLeaguesViewProps> = ({ onStartDai
   const [leagues, setLeagues] = useState<any>(null);
   const [teams, setTeams] = useState<any[]>([]);
   const [achievements, setAchievements] = useState<any[]>([]);
+  const [teamName, setTeamName] = useState('');
+  const [leagueTopic, setLeagueTopic] = useState('');
+  const [message, setMessage] = useState('');
 
   useEffect(() => {
     api.getLeaderboard('global').then(res => setLeaderboard(res.leaderboard || []));
-    api.getLeagues().then(res => setLeagues(res));
-    api.getTeams().then(res => setTeams(res.teams || []));
+    api.getLeagues(leagueTopic || undefined).then(res => setLeagues(res)).catch(err => setMessage(err.message));
+    api.getTeams().then(res => setTeams(res.teams || [])).catch(err => setMessage(err.message));
     api.getAchievements().then(res => setAchievements(res.achievements || []));
-  }, []);
+  }, [leagueTopic]);
+
+  const refreshTeams = async () => {
+    const response = await api.getTeams();
+    setTeams(response.teams || []);
+  };
+
+  const handleCreateTeam = async (event: React.FormEvent) => {
+    event.preventDefault();
+    try {
+      await api.createTeam(teamName);
+      setTeamName('');
+      setMessage('Team created. Invite up to four teammates to join.');
+      await refreshTeams();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to create team.');
+    }
+  };
+
+  const handleJoinTeam = async (teamId: string) => {
+    try {
+      const result = await api.joinTeam(teamId);
+      setMessage(result.message || 'You joined the team.');
+      await refreshTeams();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to join team.');
+    }
+  };
+
+  const handleLeaveTeam = async (teamId: string) => {
+    try {
+      const result = await api.leaveTeam(teamId);
+      setMessage(result.message || 'You left the team.');
+      await refreshTeams();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to leave team.');
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -58,10 +98,16 @@ export const SocialLeaguesView: React.FC<SocialLeaguesViewProps> = ({ onStartDai
             className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 text-white font-bold text-sm shadow-xl shadow-amber-500/20 hover:opacity-95 flex items-center gap-2"
           >
             <Flame className="w-4 h-4 fill-white" />
-            Play Daily Challenge (+300 XP)
+            Play Server-Scored Daily Challenge
           </button>
         </div>
       </div>
+
+      {message && (
+        <p role="status" className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-slate-200">
+          {message}
+        </p>
+      )}
 
       {/* Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
@@ -149,6 +195,22 @@ export const SocialLeaguesView: React.FC<SocialLeaguesViewProps> = ({ onStartDai
               Active League
             </span>
           </div>
+          <label className="flex items-center gap-3 text-xs text-slate-300">
+            Topic standings
+            <select
+              value={leagueTopic}
+              onChange={(event) => setLeagueTopic(event.target.value)}
+              className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
+            >
+              <option value="">All topics</option>
+              <option value="percentages">Quantitative</option>
+              <option value="tsd">Time, Speed & Distance</option>
+              <option value="num_series">Logical</option>
+              <option value="probability">Probability</option>
+              <option value="dsa">Data Structures</option>
+              <option value="placement">Placement</option>
+            </select>
+          </label>
 
           <div className="space-y-3">
             {leagues.standings?.map((st: any) => (
@@ -160,7 +222,7 @@ export const SocialLeaguesView: React.FC<SocialLeaguesViewProps> = ({ onStartDai
                   <span className="text-xl">{st.badge}</span>
                   <div>
                     <div className="font-bold text-white text-sm">{st.college}</div>
-                    <div className="text-[10px] text-slate-400">{st.participants} Registered Competitors • {st.wins} Match Wins</div>
+                    <div className="text-[10px] text-slate-400">{st.participants} active competitors</div>
                   </div>
                 </div>
 
@@ -176,25 +238,44 @@ export const SocialLeaguesView: React.FC<SocialLeaguesViewProps> = ({ onStartDai
 
       {/* TAB 3: BATTLE SQUADS */}
       {activeTab === 'teams' && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {teams.map((t) => (
-            <div key={t.id} className="glass-panel rounded-3xl p-6 bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-[10px] uppercase font-bold text-cyan-400">{t.college}</span>
-                  <span className="text-xs font-mono text-purple-300 font-bold">{t.totalScore} pts</span>
+        <div className="space-y-6">
+          <form onSubmit={handleCreateTeam} className="glass-panel rounded-3xl p-5 bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row gap-3">
+            <input
+              value={teamName}
+              onChange={(event) => setTeamName(event.target.value)}
+              required
+              maxLength={128}
+              placeholder="Create a team name"
+              className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white"
+            />
+            <button type="submit" disabled={teams.some(team => Number(team.joined_by_me) === 1)} className="px-5 py-2 rounded-xl bg-cyan-700 text-white text-xs font-bold disabled:opacity-50">
+              Create Team
+            </button>
+          </form>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {teams.map((t) => (
+              <div key={t.id} className="glass-panel rounded-3xl p-6 bg-slate-900/90 border border-slate-800 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-[10px] uppercase font-bold text-cyan-400">{t.college}</span>
+                    <span className="text-xs font-mono text-purple-300 font-bold">{Number(t.total_score) || 0} pts</span>
+                  </div>
+                  <h4 className="text-lg font-bold text-white mb-1">{t.name}</h4>
+                  <p className="text-xs text-slate-400">Captain: {t.leader || 'Team captain'} • {t.members_count} / 5 Members</p>
+                  <p className="text-[10px] text-slate-500 mt-2">Team battles require 3–5 participating players on each team.</p>
                 </div>
-                <h4 className="text-lg font-bold text-white mb-1">{t.name}</h4>
-                <p className="text-xs text-slate-400">Leader: {t.leader} • {t.membersCount} Members</p>
-              </div>
 
-              <button
-                className="mt-6 w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition-colors"
-              >
-                Request to Join Squad
-              </button>
-            </div>
-          ))}
+                <button
+                  onClick={() => Number(t.joined_by_me) === 1 ? void handleLeaveTeam(t.id) : void handleJoinTeam(t.id)}
+                  disabled={Number(t.joined_by_me) !== 1 && (Number(t.members_count) >= 5 || teams.some(team => Number(team.joined_by_me) === 1))}
+                  className={`mt-6 w-full py-2.5 rounded-xl text-xs font-bold border transition-colors disabled:opacity-50 ${Number(t.joined_by_me) === 1 ? 'bg-rose-950/60 border-rose-800 text-rose-200' : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'}`}
+                >
+                  {Number(t.joined_by_me) === 1 ? 'Leave Team' : Number(t.members_count) >= 5 ? 'Team Full' : 'Join Team'}
+                </button>
+              </div>
+            ))}
+            {!teams.length && <p className="text-sm text-slate-400">No teams yet. Create the first one and invite teammates.</p>}
+          </div>
         </div>
       )}
 

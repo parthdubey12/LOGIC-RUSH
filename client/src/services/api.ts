@@ -59,6 +59,45 @@ export const api = {
     return res.json();
   },
 
+  async getQuestionBank() {
+    const res = await fetch(`${API_BASE_URL}/questions/bank`, { headers: getAuthHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to fetch question bank.');
+    return data;
+  },
+
+  async startPracticeSession(data: { topics: string[]; difficulty: string; question_count: number }) {
+    const res = await fetch(`${API_BASE_URL}/questions/sessions/start`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to start practice session.');
+    return result;
+  },
+
+  async submitPracticeAnswer(sessionId: string, data: { question_id: string; selected_option_index: number }) {
+    const res = await fetch(`${API_BASE_URL}/questions/sessions/${encodeURIComponent(sessionId)}/answer`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to submit practice answer.');
+    return result;
+  },
+
+  async completePracticeSession(sessionId: string) {
+    const res = await fetch(`${API_BASE_URL}/questions/sessions/${encodeURIComponent(sessionId)}/complete`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to complete practice session.');
+    return result;
+  },
+
   async createQuestion(data: any) {
     const res = await fetch(`${API_BASE_URL}/questions`, {
       method: 'POST',
@@ -66,6 +105,39 @@ export const api = {
       body: JSON.stringify(data)
     });
     return res.json();
+  },
+
+  async getMyQuestionSets() {
+    const res = await fetch(`${API_BASE_URL}/questions/sets/mine`, {
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to fetch question sets.');
+    return data;
+  },
+
+  async getQuestionSet(setId: string) {
+    const res = await fetch(`${API_BASE_URL}/questions/sets/${encodeURIComponent(setId)}`, {
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to fetch question set.');
+    return data;
+  },
+
+  async saveQuestionSet(data: { id?: string; title: string; description?: string; question_ids: string[] }) {
+    const isUpdate = Boolean(data.id);
+    const res = await fetch(
+      `${API_BASE_URL}/questions/sets${isUpdate ? `/${encodeURIComponent(data.id!)}` : ''}`,
+      {
+        method: isUpdate ? 'PUT' : 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data)
+      }
+    );
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to save question set.');
+    return result;
   },
 
   // Rooms
@@ -101,6 +173,15 @@ export const api = {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to fetch room attempts.');
+    return data;
+  },
+
+  async getRoomQuestionAnalytics(roomId: string) {
+    const res = await fetch(`${API_BASE_URL}/rooms/${roomId}/question-analytics`, {
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to fetch question analytics.');
     return data;
   },
 
@@ -140,14 +221,49 @@ export const api = {
     return res.json();
   },
 
-  async getLeagues() {
-    const res = await fetch(`${API_BASE_URL}/social/leagues`);
+  async getLeagues(topicId?: string) {
+    const query = new URLSearchParams();
+    if (topicId) query.set('topic_id', topicId);
+    const res = await fetch(`${API_BASE_URL}/social/leagues?${query.toString()}`);
     return res.json();
   },
 
   async getTeams() {
-    const res = await fetch(`${API_BASE_URL}/social/teams`);
-    return res.json();
+    const res = await fetch(`${API_BASE_URL}/social/teams`, { headers: getAuthHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to fetch teams.');
+    return data;
+  },
+
+  async createTeam(name: string) {
+    const res = await fetch(`${API_BASE_URL}/social/teams`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ name })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to create team.');
+    return data;
+  },
+
+  async joinTeam(teamId: string) {
+    const res = await fetch(`${API_BASE_URL}/social/teams/${encodeURIComponent(teamId)}/join`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to join team.');
+    return data;
+  },
+
+  async leaveTeam(teamId: string) {
+    const res = await fetch(`${API_BASE_URL}/social/teams/${encodeURIComponent(teamId)}/membership`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to leave team.');
+    return data;
   },
 
   async getDailyChallenge() {
@@ -155,13 +271,30 @@ export const api = {
     return res.json();
   },
 
-  async submitDailyChallenge(data: any) {
+  async submitDailyChallengeAnswer(data: {
+    challenge_id: string;
+    question_id: string;
+    selected_option_index: number;
+  }) {
     const res = await fetch(`${API_BASE_URL}/social/daily-challenge/submit`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
-    return res.json();
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to submit daily challenge answer.');
+    return result;
+  },
+
+  async completeDailyChallenge(challengeId: string) {
+    const res = await fetch(`${API_BASE_URL}/social/daily-challenge/complete`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ challenge_id: challengeId })
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Failed to complete daily challenge.');
+    return result;
   },
 
   async getAchievements() {

@@ -104,3 +104,54 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+html.large-text {
+  font-size: 112.5%;
+}
+
+html.color-safe .text-emerald-300,
+html.color-safe .text-emerald-400,
+html.color-safe .text-green-400 {
+  color: #7dd3fc !important;
+}
+
+html.color-safe .text-rose-300,
+html.color-safe .text-rose-400,
+html.color-safe .text-red-400 {
+  color: #fcd34d !important;
+}
+
+html.color-safe .bg-emerald-600,
+html.color-safe .bg-emerald-500 {
+  background-color: #075985 !important;
+}
+
+html.color-safe .bg-rose-600,
+html.color-safe .bg-red-600 {
+  background-color: #854d0e !important;
+}
+
+html.color-safe button:focus-visible,
+html.color-safe a:focus-visible,
+html.color-safe input:focus-visible,
+html.color-safe select:focus-visible {
+  outline: 3px solid #fcd34d;
+  outline-offset: 2px;
+}
+
+html.low-data .question-media {
+  display: none !important;
+}
+
+html.low-data .glass-panel,
+html.low-data .glass-panel-glow {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html.low-data *,
+html.low-data *::before,
+html.low-data *::after {
+  animation: none !important;
+  transition: none !important;
+}

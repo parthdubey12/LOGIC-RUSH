@@ -5,23 +5,15 @@ import { sound } from '../services/audio';
 import {
   Zap,
   Clock,
-  CheckCircle2,
-  XCircle,
   Brain,
   Flame,
   Sparkles,
-  HelpCircle,
-  Shield,
-  Plus,
   ArrowRight,
-  TrendingUp,
   Award,
-  Users,
   Maximize,
   Minimize,
   ShieldAlert,
-  Video,
-  AlertTriangle
+  Video
 } from 'lucide-react';
 
 interface LiveQuizArenaProps {
@@ -36,6 +28,8 @@ interface LiveQuizArenaProps {
   answeredCount: number;
   totalPlayers: number;
   isHost: boolean;
+  isSpectator?: boolean;
+  hasSubmittedInitially?: boolean;
   onNextRound: () => void;
 }
 
@@ -46,6 +40,8 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
   answeredCount,
   totalPlayers,
   isHost,
+  isSpectator = false,
+  hasSubmittedInitially = false,
   onNextRound
 }) => {
   const socket = getSocket();
@@ -54,9 +50,6 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [eliminatedOptions, setEliminatedOptions] = useState<number[]>([]);
   const [doublePointsActive, setDoublePointsActive] = useState(false);
-  const [extraTimeSec, setExtraTimeSec] = useState(0);
-  const [hintText, setHintText] = useState<string | null>(null);
-  const [streakShieldActive, setStreakShieldActive] = useState(false);
 
   // Proctoring & Anti-Cheat State
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -67,22 +60,30 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
 
   // Time remaining countdown
   const [timeLeft, setTimeLeft] = useState(question.timeLimitSec);
+  let questionTable: unknown[][] | null = null;
+  if (question.table_data) {
+    try {
+      const parsed: unknown = JSON.parse(question.table_data);
+      if (Array.isArray(parsed) && parsed.every(row => Array.isArray(row))) {
+        questionTable = parsed as unknown[][];
+      }
+    } catch {
+      questionTable = null;
+    }
+  }
 
   // Reset per question round
   useEffect(() => {
     setSelectedOption(null);
-    setHasSubmitted(false);
+    setHasSubmitted(hasSubmittedInitially);
     setEliminatedOptions([]);
     setDoublePointsActive(false);
-    setExtraTimeSec(0);
-    setHintText(null);
-    setStreakShieldActive(false);
-    setTimeLeft(question.timeLimitSec);
-  }, [question.id, question.index]);
+    setTimeLeft(Math.ceil((question.remainingTimeMs ?? question.timeLimitSec * 1000) / 1000));
+  }, [question.id, question.index, hasSubmittedInitially]);
 
   // Tab switch anti-cheat detection (Only for students)
   useEffect(() => {
-    if (isHost || isDisqualified) return;
+    if (isHost || isSpectator || isDisqualified) return;
 
     const handleViolation = () => {
       socket.emit('tab_switch_violation');
@@ -108,7 +109,7 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [socket, isHost, isDisqualified, roundState]);
+  }, [socket, isHost, isSpectator, isDisqualified, roundState]);
 
   // Socket Proctoring Listeners
   useEffect(() => {
@@ -139,9 +140,11 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
   useEffect(() => {
     if (roundState !== 'question' || isDisqualified) return;
 
+    const initialRemainingMs = question.remainingTimeMs ?? question.timeLimitSec * 1000;
+    const receivedAt = question.receivedAt ?? performance.now();
     const interval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - question.startTime) / 1000);
-      const remaining = Math.max(0, (question.timeLimitSec + extraTimeSec) - elapsed);
+      const elapsedSinceReceipt = performance.now() - receivedAt;
+      const remaining = Math.max(0, Math.ceil((initialRemainingMs - elapsedSinceReceipt) / 1000));
       setTimeLeft(remaining);
 
       if (remaining <= 5 && remaining > 0) {
@@ -154,12 +157,12 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
     }, 250);
 
     return () => clearInterval(interval);
-  }, [roundState, question.startTime, question.timeLimitSec, extraTimeSec, isDisqualified]);
+  }, [roundState, question.receivedAt, question.remainingTimeMs, question.timeLimitSec, isDisqualified]);
 
   // Keyboard shortcut listener (1, 2, 3, 4 / A, B, C, D)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (roundState !== 'question' || hasSubmitted || isDisqualified) return;
+      if (roundState !== 'question' || hasSubmitted || isDisqualified || isSpectator || isHost) return;
 
       const key = e.key.toUpperCase();
       let index = -1;
@@ -175,7 +178,7 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [roundState, hasSubmitted, question.options, eliminatedOptions, isDisqualified]);
+  }, [roundState, hasSubmitted, question.options, eliminatedOptions, isDisqualified, isSpectator, isHost]);
 
   // Powerup socket events listener
   useEffect(() => {
@@ -185,12 +188,6 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
         setEliminatedOptions(data.eliminatedIndices || []);
       } else if (data.powerUpType === 'doublePoints') {
         setDoublePointsActive(true);
-      } else if (data.powerUpType === 'extraTime') {
-        setExtraTimeSec(prev => prev + (data.addedSec || 5));
-      } else if (data.powerUpType === 'hintCard') {
-        setHintText(data.hint);
-      } else if (data.powerUpType === 'streakShield') {
-        setStreakShieldActive(true);
       }
     };
 
@@ -207,10 +204,7 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
     setHasSubmitted(true);
     sound.playTick();
 
-    socket.emit('submit_answer', {
-      selectedOptionIndex: optionIndex,
-      clientTimestamp: Date.now()
-    });
+    socket.emit('submit_answer', { selectedOptionIndex: optionIndex });
   };
 
   const handleUsePowerup = (type: string) => {
@@ -225,7 +219,7 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
     }
   };
 
-  const totalDuration = question.timeLimitSec + extraTimeSec;
+  const totalDuration = question.timeLimitSec;
   const timerPercentage = Math.max(0, Math.min(100, (timeLeft / totalDuration) * 100));
 
   return (
@@ -300,10 +294,16 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
                 <span className="px-3 py-1.5 rounded-xl bg-purple-600/30 border border-purple-500/40 text-purple-300 font-mono font-black text-sm">
                   Q {question.index} / {question.total}
                 </span>
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-extrabold">
-                  <Video className="w-3 h-3" />
-                  <span className="hidden sm:inline">PROCTORED LOCK ACTIVE</span>
-                </div>
+                {isSpectator ? (
+                  <div className="px-2.5 py-1 rounded-full bg-blue-500/20 text-blue-200 border border-blue-400/40 text-xs font-bold">
+                    PROJECTOR VIEW • WATCHING
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-extrabold">
+                    <Video className="w-3 h-3" />
+                    <span className="hidden sm:inline">PROCTORED LOCK ACTIVE</span>
+                  </div>
+                )}
               </div>
 
               {/* Center: Authoritative Countdown Timer */}
@@ -368,16 +368,6 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
                   <Sparkles className="w-3.5 h-3.5" /> 2X Double Points Active
                 </span>
               )}
-              {streakShieldActive && (
-                <span className="px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold border border-indigo-500/30 flex items-center gap-1">
-                  <Shield className="w-3.5 h-3.5" /> Streak Shield Active
-                </span>
-              )}
-              {extraTimeSec > 0 && (
-                <span className="px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300 text-xs font-bold border border-cyan-500/30 flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5" /> +{extraTimeSec}s Extra Time
-                </span>
-              )}
               <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400 text-xs font-semibold capitalize ml-auto">
                 {question.difficulty} Tier (Options Jumbled)
               </span>
@@ -388,19 +378,32 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
               {question.statement}
             </h3>
 
-            {/* Hint Card Box (if activated) */}
-            {hintText && (
-              <div className="mb-6 p-4 rounded-2xl bg-cyan-950/40 border border-cyan-500/40 text-cyan-200 text-sm flex items-start gap-3">
-                <HelpCircle className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
-                <div>
-                  <strong className="text-cyan-300 block text-xs uppercase font-extrabold mb-0.5">Tactical Hint:</strong>
-                  {hintText}
-                </div>
+            {question.image_url && (
+              <img
+                src={question.image_url}
+                alt="Question illustration"
+                loading="lazy"
+                className="question-media max-h-72 max-w-full object-contain rounded-xl mb-6"
+              />
+            )}
+            {questionTable && (
+              <div className="overflow-x-auto rounded-xl border border-slate-700 bg-slate-950 mb-6">
+                <table className="w-full text-left text-sm text-slate-100">
+                  <tbody>
+                    {questionTable.map((row, rowIndex) => (
+                      <tr key={rowIndex} className={rowIndex === 0 ? 'bg-slate-800 font-bold' : 'border-t border-slate-800'}>
+                        {row.map((cell, cellIndex) => (
+                          <td key={cellIndex} className="px-4 py-3">{String(cell)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 
             {/* 4 Answer Options Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className={`grid grid-cols-1 ${isSpectator ? 'lg:grid-cols-2' : 'sm:grid-cols-2'} gap-4`}>
               {question.options.map((optionText, idx) => {
                 const isEliminated = eliminatedOptions.includes(idx);
                 const isSelected = selectedOption === idx;
@@ -418,9 +421,9 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
                 return (
                   <button
                     key={idx}
-                    disabled={hasSubmitted || isEliminated || roundState !== 'question'}
+                    disabled={isSpectator || isHost || hasSubmitted || isEliminated || roundState !== 'question'}
                     onClick={() => handleOptionSubmit(idx)}
-                    className={`p-5 rounded-2xl border text-left font-bold transition-all relative flex items-center justify-between ${buttonStyle}`}
+                    className={`${isSpectator ? 'p-7 text-xl' : 'p-5'} rounded-2xl border text-left font-bold transition-all relative flex items-center justify-between ${buttonStyle}`}
                   >
                     <div className="flex items-center gap-3.5">
                       <span className="w-8 h-8 rounded-xl bg-slate-950/90 flex items-center justify-center font-mono font-bold text-xs border border-slate-700 text-purple-300">
@@ -434,7 +437,7 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
             </div>
 
             {/* In-Game Power-Ups Bar */}
-            {roundState === 'question' && !hasSubmitted && (
+            {roundState === 'question' && !hasSubmitted && !isSpectator && !isHost && (
               <div className="mt-8 pt-6 border-t border-slate-800 flex flex-wrap items-center justify-between gap-4">
                 <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
                   <Zap className="w-4 h-4 text-brand-cyan" />
@@ -458,21 +461,6 @@ export const LiveQuizArena: React.FC<LiveQuizArenaProps> = ({
                     2X Points
                   </button>
 
-                  <button
-                    onClick={() => handleUsePowerup('extraTime')}
-                    disabled={extraTimeSec > 0}
-                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold border border-slate-700 transition-colors disabled:opacity-40"
-                  >
-                    +5s Time
-                  </button>
-
-                  <button
-                    onClick={() => handleUsePowerup('hintCard')}
-                    disabled={!!hintText}
-                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-purple-300 text-xs font-bold border border-slate-700 transition-colors disabled:opacity-40"
-                  >
-                    Hint Card
-                  </button>
                 </div>
               </div>
             )}

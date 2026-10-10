@@ -25,16 +25,36 @@ router.post('/create', authenticate, async (req, res) => {
       max_players = 50,
       question_count = 10,
       time_per_question = 20,
+      question_set_id = null,
+      team_battle = false,
       powerups_enabled = true,
       scoring_rules = {}
     } = req.body;
+
+    let selectedQuestionCount = Math.max(1, Math.min(parseInt(question_count, 10) || 10, 100));
+    if (question_set_id) {
+      const questionSet = await queryOne(
+        `SELECT id, created_by FROM question_sets WHERE id = $1`,
+        [question_set_id]
+      );
+      if (!questionSet) return res.status(404).json({ error: 'Question set not found.' });
+      if (questionSet.created_by !== req.user.id && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'You do not have access to this question set.' });
+      }
+      const setQuestions = await query(
+        'SELECT question_id FROM question_set_items WHERE set_id = $1 ORDER BY order_index ASC',
+        [question_set_id]
+      );
+      if (!setQuestions.length) return res.status(400).json({ error: 'This question set has no questions.' });
+      selectedQuestionCount = Math.min(selectedQuestionCount, setQuestions.length);
+    }
 
     const roomId = 'room_' + uuidv4().substring(0, 8);
     const code = generateRoomCode();
 
     await query(
-      `INSERT INTO rooms (id, code, host_id, title, topic_id, difficulty, max_players, question_count, time_per_question, powerups_enabled, scoring_rules, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'waiting')`,
+      `INSERT INTO rooms (id, code, host_id, title, topic_id, difficulty, max_players, question_count, time_per_question, question_set_id, team_battle, powerups_enabled, scoring_rules, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'waiting')`,
       [
         roomId,
         code,
@@ -43,9 +63,11 @@ router.post('/create', authenticate, async (req, res) => {
         topic_id,
         difficulty,
         Math.min(max_players || 50, 50),
-        question_count || 10,
+        selectedQuestionCount,
         time_per_question || 20,
-        Boolean(powerups_enabled),
+        question_set_id,
+        team_battle === true,
+        powerups_enabled !== false,
         JSON.stringify(scoring_rules || {})
       ]
     );
@@ -60,8 +82,10 @@ router.post('/create', authenticate, async (req, res) => {
         topic_id,
         difficulty,
         max_players,
-        question_count,
+        question_count: selectedQuestionCount,
         time_per_question,
+        question_set_id,
+        team_battle: team_battle === true,
         powerups_enabled,
         status: 'waiting'
       }
@@ -130,6 +154,31 @@ router.get('/:roomId/attempts', authenticate, requireRole(['host', 'admin']), as
   } catch (err) {
     console.error('Failed to fetch room attempts:', err);
     return res.status(500).json({ error: 'Failed to fetch room attempts.' });
+  }
+});
+
+router.get('/:roomId/question-analytics', authenticate, requireRole(['host', 'admin']), async (req, res) => {
+  try {
+    const room = await queryOne('SELECT id, host_id FROM rooms WHERE id = $1', [req.params.roomId]);
+    if (!room) return res.status(404).json({ error: 'Room not found.' });
+    if (room.host_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You do not have access to this room.' });
+    }
+    const questions = await query(
+      `SELECT q.id AS question_id, q.statement, q.topic_id, stats.correct_count, stats.wrong_count,
+              CASE WHEN stats.correct_count + stats.wrong_count = 0 THEN 0
+                   ELSE ROUND(100.0 * stats.wrong_count / (stats.correct_count + stats.wrong_count), 1)
+              END AS wrong_percent
+       FROM room_question_stats stats
+       JOIN questions q ON q.id = stats.question_id
+       WHERE stats.room_id = $1
+       ORDER BY stats.wrong_count DESC, wrong_percent DESC, q.statement ASC`,
+      [req.params.roomId]
+    );
+    return res.json({ questions });
+  } catch (err) {
+    console.error('Failed to fetch room question analytics:', err);
+    return res.status(500).json({ error: 'Failed to fetch question analytics.' });
   }
 });
 

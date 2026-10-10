@@ -74,10 +74,12 @@ Do not commit `.env` files, credentials, or database files. Production mode refu
 ```
 
 ### Authoritative Server-Side Fairness & Latency Handling
-- **Server-Side Timers:** The server sets the official question start timestamp (`startTime`) and end deadline. Client clocks are never trusted as the scoring authority.
-- **Latency Tolerance Window:** A 1.5-second buffer is granted to accommodate variable network latencies without penalizing high-ping participants.
-- **Option Randomization:** Answer option order is shuffled deterministically/randomly per player while preserving the correct option mapping on the server.
-- **Answer Secrecy:** The correct answer index and explanations are never sent over the network until the server officially closes the round.
+- **Server is the referee:** The server starts and ends each round using its monotonic clock. Browser clocks are display-only; submitted client timestamps are ignored.
+- **Network delay:** The server periodically measures each socket's round-trip time, uses half of the best of its last eight samples (capped at 500 ms) as an approximate one-way delay adjustment, and adds a 1.5-second receipt grace window. The server—not the device—checks the adjusted receipt time. This reduces ordinary connection-jitter advantage but cannot guarantee identical paths or prevent a client from deliberately delaying probe replies; the adjustment is capped.
+- **Option randomization:** Each player gets independently shuffled options. The answer mapping remains server-side.
+- **Answer secrecy:** Live sockets expose only the shuffled choices. The correct choice and explanation are sent after the round ends. Public question/practice-session endpoints omit answer keys; practice and daily challenge answers are checked by the server.
+- **Reconnects and duplicates:** A disconnected player's match state stays in the active room. Rejoining with the same account restores the score and current question/review; already-submitted answers are not accepted again. Late answers are ignored.
+- **Spectators:** Watch-only/projector connections are not counted as players and cannot submit answers or affect scoring.
 
 ### Scoring Formula
 $$\text{Score} = \text{Base Points (1000)} \times \text{Difficulty Multiplier} \times \text{Speed Factor}$$
@@ -88,7 +90,8 @@ $$\text{Score} = \text{Base Points (1000)} \times \text{Difficulty Multiplier} \
   - Hard: $1.5\times$
 - **Speed Multiplier:**
   $$\text{Speed Factor} = \max\left(0.4,\, 1.0 - 0.6 \times \frac{\text{Response Time (ms)}}{\text{Total Allowed Time (ms)}}\right)$$
-- **Negative Marking:** Optional host setting ($-250$ points for incorrect answers).
+- **Incorrect answers:** 0 points; there is no negative marking.
+- **Power-ups:** Server-limited to one 50/50 and one double-points use per player per match.
 
 ---
 
@@ -138,15 +141,21 @@ Covering all topics tested by TCS, Infosys, Wipro, Amazon, and GATE:
 - Create custom quiz rooms and host live sessions.
 - Copy student invitation links that take students to sign-in and join the selected room.
 - View each room's student attempts, completion status, and scores; the latest attempt per student is shown.
-- Question bank builder (Add, edit, delete, categorize).
-- Host-reviewed question authoring and management.
+- Author questions with topic, difficulty, image URL, or JSON table data; edit and delete authored questions through the API.
+- Compose, reorder, edit, and reuse private question sets when creating a room.
+- Review per-room most-missed question statistics.
 - Export match results and class rankings to CSV.
 
 ### 6. Leagues, Battle Squads & Achievements
-- Global and Inter-College League standings.
-- Campus teams and battle squads.
-- Daily challenges with consecutive streak tracking.
+- Quarter-based college standings and topic standings are calculated from completed multiplayer rooms.
+- Students can create or join persisted teams (maximum five members). Team-battle rooms require at least two teams with 3–5 connected members each; standings use the server-calculated sum of their individual scores.
+- Daily challenge attempts are checked question-by-question on the server. A user can answer each daily question once; completion, score, XP, and consecutive UTC-day streak are server-calculated.
 - Badges: *Speed Demon*, *Logic Legend*, *Accuracy Assassin*, *Streak Titan*, *Arena Champion*.
+
+### 7. Spectator, Adaptive & Accessible Play
+- A projector/spectator link is available for room viewing without scoring participation.
+- The next question's difficulty adjusts from the room's preceding-round accuracy.
+- Sound can be muted. Device-saved accessibility controls provide larger text, a high-contrast colour-blind-safe palette, and low-data mode that hides question images and animation.
 
 ---
 
@@ -161,9 +170,9 @@ Covering all topics tested by TCS, Infosys, Wipro, Amazon, and GATE:
 
 ## 🧪 Testing & Verification
 
-1. **Scoring Engine Tests:** `npm test` in `server/` verifies base points, difficulty multipliers, speed decay, and negative marking.
-2. **50-Player Load Simulation:** `node tests/simulate_50_players.js` verifies concurrent room joins, synchronized question delivery, and podium computation.
-3. **Frontend Build:** `npm run build` in `client/` produces a production bundle with 0 errors.
+1. **Scoring and socket tests:** `npm test` in `server/`.
+2. **50-player end-to-end simulation:** `npm run simulate-50` provisions 50 signed-in test identities, joins them to one live room, has each answer three rounds, verifies 50 distinct final leaderboard entries, and removes its temporary room/accounts afterward. The local run for this change completed successfully.
+3. **Frontend verification:** `npx tsc --noEmit` and `npx vite build` in `client/` both pass. Vite reports the existing large JavaScript chunk warning; it does not fail the build.
 
 ---
 

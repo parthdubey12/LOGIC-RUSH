@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS questions (
   tags TEXT,
   author_id VARCHAR(64) REFERENCES users(id) ON DELETE SET NULL,
   image_url TEXT,
+  table_data TEXT,
   usage_count INTEGER DEFAULT 0,
   correct_count INTEGER DEFAULT 0,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -103,6 +104,8 @@ CREATE TABLE IF NOT EXISTS rooms (
   max_players INTEGER DEFAULT 50,
   question_count INTEGER DEFAULT 10,
   time_per_question INTEGER DEFAULT 20,
+  question_set_id VARCHAR(64) REFERENCES question_sets(id) ON DELETE SET NULL,
+  team_battle BOOLEAN DEFAULT false,
   powerups_enabled BOOLEAN DEFAULT true,
   scoring_rules JSONB,
   status VARCHAR(32) DEFAULT 'waiting', -- 'waiting', 'active', 'finished'
@@ -133,6 +136,24 @@ CREATE TABLE IF NOT EXISTS room_attempts (
   joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   completed_at TIMESTAMP WITH TIME ZONE,
   PRIMARY KEY (room_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS room_question_stats (
+  room_id VARCHAR(64) REFERENCES rooms(id) ON DELETE CASCADE,
+  question_id VARCHAR(64) NOT NULL,
+  correct_count INTEGER NOT NULL DEFAULT 0,
+  wrong_count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (room_id, question_id)
+);
+
+CREATE TABLE IF NOT EXISTS room_topic_attempts (
+  room_id VARCHAR(64) REFERENCES rooms(id) ON DELETE CASCADE,
+  user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
+  topic_id VARCHAR(64) NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  correct INTEGER NOT NULL DEFAULT 0,
+  total_time_ms BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (room_id, user_id, topic_id)
 );
 
 -- Matches History
@@ -204,8 +225,17 @@ CREATE TABLE IF NOT EXISTS teams (
   name VARCHAR(128) NOT NULL,
   college_id VARCHAR(64) REFERENCES colleges(id) ON DELETE CASCADE,
   captain_id VARCHAR(64) REFERENCES users(id) ON DELETE SET NULL,
+  member_count INTEGER NOT NULL DEFAULT 0,
   total_score INTEGER DEFAULT 0,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS room_team_scores (
+  room_id VARCHAR(64) REFERENCES rooms(id) ON DELETE CASCADE,
+  team_id VARCHAR(64) REFERENCES teams(id) ON DELETE CASCADE,
+  score INTEGER NOT NULL DEFAULT 0,
+  rank INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (room_id, team_id)
 );
 
 CREATE TABLE IF NOT EXISTS team_members (
@@ -215,6 +245,10 @@ CREATE TABLE IF NOT EXISTS team_members (
   joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT unique_team_member UNIQUE(team_id, user_id)
 );
+
+ALTER TABLE teams ADD COLUMN IF NOT EXISTS member_count INTEGER NOT NULL DEFAULT 0;
+UPDATE teams SET member_count = (SELECT COUNT(*) FROM team_members WHERE team_members.team_id = teams.id);
+CREATE UNIQUE INDEX IF NOT EXISTS unique_team_member_user_idx ON team_members(user_id);
 
 -- College Leagues
 CREATE TABLE IF NOT EXISTS college_leagues (
@@ -256,6 +290,44 @@ CREATE TABLE IF NOT EXISTS challenge_attempts (
   attempted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS unique_challenge_attempt_user_idx
+  ON challenge_attempts(challenge_id, user_id);
+
+CREATE TABLE IF NOT EXISTS daily_challenge_answers (
+  id VARCHAR(64) PRIMARY KEY,
+  attempt_id VARCHAR(64) REFERENCES challenge_attempts(id) ON DELETE CASCADE,
+  question_id VARCHAR(64) NOT NULL,
+  selected_option INTEGER NOT NULL,
+  is_correct BOOLEAN NOT NULL,
+  answered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (attempt_id, question_id)
+);
+
+CREATE TABLE IF NOT EXISTS daily_challenge_streaks (
+  user_id VARCHAR(64) PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  streak INTEGER NOT NULL DEFAULT 0,
+  last_challenge_date DATE
+);
+
+CREATE TABLE IF NOT EXISTS question_sessions (
+  id VARCHAR(64) PRIMARY KEY,
+  user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  question_ids JSONB NOT NULL,
+  completed BOOLEAN DEFAULT false,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS question_session_answers (
+  id VARCHAR(64) PRIMARY KEY,
+  session_id VARCHAR(64) REFERENCES question_sessions(id) ON DELETE CASCADE,
+  question_id VARCHAR(64) NOT NULL,
+  selected_option INTEGER NOT NULL,
+  is_correct BOOLEAN NOT NULL,
+  answered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (session_id, question_id)
+);
+
 -- Notifications
 CREATE TABLE IF NOT EXISTS notifications (
   id VARCHAR(64) PRIMARY KEY,
@@ -275,3 +347,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   details JSONB,
   timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE questions ADD COLUMN IF NOT EXISTS table_data TEXT;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS question_set_id VARCHAR(64) REFERENCES question_sets(id) ON DELETE SET NULL;
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS team_battle BOOLEAN DEFAULT false;
+CREATE UNIQUE INDEX IF NOT EXISTS unique_team_member_idx ON team_members(team_id, user_id);

@@ -42,7 +42,7 @@ export async function query(sql, params = []) {
   } else {
     return new Promise((resolve, reject) => {
       const trimmed = adaptedSql.trim().toUpperCase();
-      if (trimmed.startsWith('SELECT') || trimmed.startsWith('PRAGMA')) {
+      if (trimmed.startsWith('SELECT') || trimmed.startsWith('PRAGMA') || /\bRETURNING\b/.test(trimmed)) {
         sqliteDb.all(adaptedSql, params, (err, rows) => {
           if (err) reject(err);
           else resolve(rows || []);
@@ -136,6 +136,7 @@ export async function initDb() {
     tags TEXT,
     author_id TEXT,
     image_url TEXT,
+    table_data TEXT,
     usage_count INTEGER DEFAULT 0,
     correct_count INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -152,6 +153,15 @@ export async function initDb() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
 
+  await runAsync(`CREATE TABLE IF NOT EXISTS question_set_items (
+    id TEXT PRIMARY KEY,
+    set_id TEXT NOT NULL,
+    question_id TEXT NOT NULL,
+    order_index INTEGER NOT NULL,
+    FOREIGN KEY (set_id) REFERENCES question_sets(id) ON DELETE CASCADE,
+    FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE
+  );`);
+
   await runAsync(`CREATE TABLE IF NOT EXISTS rooms (
     id TEXT PRIMARY KEY,
     code TEXT UNIQUE NOT NULL,
@@ -162,6 +172,8 @@ export async function initDb() {
     max_players INTEGER DEFAULT 50,
     question_count INTEGER DEFAULT 10,
     time_per_question INTEGER DEFAULT 20,
+    question_set_id TEXT,
+    team_battle INTEGER DEFAULT 0,
     powerups_enabled INTEGER DEFAULT 1,
     scoring_rules TEXT,
     status TEXT DEFAULT 'waiting',
@@ -190,6 +202,27 @@ export async function initDb() {
     joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     completed_at DATETIME,
     PRIMARY KEY (room_id, user_id),
+    FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS room_question_stats (
+    room_id TEXT NOT NULL,
+    question_id TEXT NOT NULL,
+    correct_count INTEGER NOT NULL DEFAULT 0,
+    wrong_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (room_id, question_id),
+    FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS room_topic_attempts (
+    room_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    topic_id TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    correct INTEGER NOT NULL DEFAULT 0,
+    total_time_ms INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (room_id, user_id, topic_id),
     FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );`);
@@ -247,6 +280,7 @@ export async function initDb() {
     name TEXT NOT NULL,
     college_id TEXT,
     captain_id TEXT,
+    member_count INTEGER NOT NULL DEFAULT 0,
     total_score INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
@@ -256,6 +290,18 @@ export async function initDb() {
     team_id TEXT,
     user_id TEXT,
     joined_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+  await runAsync('CREATE UNIQUE INDEX IF NOT EXISTS unique_team_member_idx ON team_members(team_id, user_id);');
+  await runAsync('CREATE UNIQUE INDEX IF NOT EXISTS unique_team_member_user_idx ON team_members(user_id);');
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS room_team_scores (
+    room_id TEXT NOT NULL,
+    team_id TEXT NOT NULL,
+    score INTEGER NOT NULL DEFAULT 0,
+    rank INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (room_id, team_id),
+    FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
   );`);
 
   await runAsync(`CREATE TABLE IF NOT EXISTS college_leagues (
@@ -295,6 +341,46 @@ export async function initDb() {
     completed INTEGER DEFAULT 1,
     attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
+  await runAsync('CREATE UNIQUE INDEX IF NOT EXISTS unique_challenge_attempt_user_idx ON challenge_attempts(challenge_id, user_id);');
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS daily_challenge_answers (
+    id TEXT PRIMARY KEY,
+    attempt_id TEXT NOT NULL,
+    question_id TEXT NOT NULL,
+    selected_option INTEGER NOT NULL,
+    is_correct INTEGER NOT NULL,
+    answered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (attempt_id, question_id),
+    FOREIGN KEY (attempt_id) REFERENCES challenge_attempts(id) ON DELETE CASCADE
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS daily_challenge_streaks (
+    user_id TEXT PRIMARY KEY,
+    streak INTEGER NOT NULL DEFAULT 0,
+    last_challenge_date TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS question_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    question_ids TEXT NOT NULL,
+    completed INTEGER DEFAULT 0,
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS question_session_answers (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    question_id TEXT NOT NULL,
+    selected_option INTEGER NOT NULL,
+    is_correct INTEGER NOT NULL,
+    answered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (session_id, question_id),
+    FOREIGN KEY (session_id) REFERENCES question_sessions(id) ON DELETE CASCADE
+  );`);
 
   await runAsync(`CREATE TABLE IF NOT EXISTS notifications (
     id TEXT PRIMARY KEY,
@@ -305,6 +391,20 @@ export async function initDb() {
     is_read INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`);
+
+  for (const [tableName, columnName, columnDefinition] of [
+    ['questions', 'table_data', 'TEXT'],
+    ['rooms', 'question_set_id', 'TEXT'],
+    ['rooms', 'team_battle', 'INTEGER DEFAULT 0'],
+    ['teams', 'member_count', 'INTEGER NOT NULL DEFAULT 0']
+  ]) {
+    const columns = await query(`PRAGMA table_info(${tableName})`);
+    if (!columns.some(column => column.name === columnName)) {
+      await query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
+    }
+  }
+
+  await runAsync('UPDATE teams SET member_count = (SELECT COUNT(*) FROM team_members WHERE team_members.team_id = teams.id);');
 
   console.log('✅ SQLite Local Database Initialized.');
 }

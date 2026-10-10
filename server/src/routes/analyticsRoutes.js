@@ -163,8 +163,14 @@ router.post('/fix-weakness', authenticate, async (req, res) => {
     }
 
     const formatted = questions.map(q => ({
-      ...q,
-      options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options
+      id: q.id,
+      topic_id: q.topic_id,
+      statement: q.statement,
+      options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
+      difficulty: q.difficulty,
+      solving_time_sec: q.solving_time_sec,
+      image_url: q.image_url || null,
+      table_data: q.table_data || null
     }));
 
     return res.json({

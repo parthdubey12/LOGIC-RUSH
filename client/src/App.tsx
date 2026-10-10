@@ -3,7 +3,7 @@ import { useAuth } from './context/AuthContext';
 import { getSocket } from './services/socket';
 import { api } from './services/api';
 import { sound } from './services/audio';
-import { Room, RoomParticipant, PublicQuestion, LeaderboardEntry, Question } from './types';
+import { Room, RoomParticipant, PublicQuestion, LeaderboardEntry, Question, TeamLeaderboardEntry } from './types';
 
 // Components
 import { Navbar } from './components/Navbar';
@@ -30,9 +30,12 @@ export const App: React.FC = () => {
   const [authDefaultRole, setAuthDefaultRole] = useState<'student' | 'host'>('student');
   const [inviteAuthPrompted, setInviteAuthPrompted] = useState(false);
   const [pendingRoomCode, setPendingRoomCode] = useState<string | null>(() => {
-    const roomCode = new URLSearchParams(window.location.search).get('room');
+    const roomCode = new URLSearchParams(window.location.search).get('room') || sessionStorage.getItem('logicrush_room_code');
     return roomCode?.trim().toUpperCase() || null;
   });
+  const [pendingSpectator, setPendingSpectator] = useState(() => (
+    new URLSearchParams(window.location.search).get('watch') === '1' || sessionStorage.getItem('logicrush_room_spectator') === 'true'
+  ));
 
   // Student Custom Quiz Modal State
   const [customQuizModalOpen, setCustomQuizModalOpen] = useState<boolean>(false);
@@ -42,17 +45,23 @@ export const App: React.FC = () => {
   const [activeRoom, setActiveRoom] = useState<Room | null>(null);
   const [roomPlayers, setRoomPlayers] = useState<RoomParticipant[]>([]);
   const [isRoomHost, setIsRoomHost] = useState<boolean>(false);
+  const [isRoomSpectator, setIsRoomSpectator] = useState<boolean>(false);
+  const [spectatorsCount, setSpectatorsCount] = useState<number>(0);
+  const [questionAlreadyAnswered, setQuestionAlreadyAnswered] = useState(false);
   const [currentPublicQuestion, setCurrentPublicQuestion] = useState<PublicQuestion | null>(null);
   const [roundState, setRoundState] = useState<'question' | 'round_review'>('question');
   const [roundResult, setRoundResult] = useState<any>(null);
   const [answeredCount, setAnsweredCount] = useState<number>(0);
   const [finalPodium, setFinalPodium] = useState<LeaderboardEntry[]>([]);
   const [finalLeaderboard, setFinalLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [finalTeamLeaderboard, setFinalTeamLeaderboard] = useState<TeamLeaderboardEntry[]>([]);
   const [finalTotalQuestions, setFinalTotalQuestions] = useState<number>(10);
 
   // Solo Practice Modal State
   const [soloModalOpen, setSoloModalOpen] = useState<boolean>(false);
   const [soloQuestions, setSoloQuestions] = useState<Question[]>([]);
+  const [dailyChallengeId, setDailyChallengeId] = useState<string | null>(null);
+  const [practiceSessionId, setPracticeSessionId] = useState<string | null>(null);
   const [soloTitle, setSoloTitle] = useState<string>('Solo Practice Drill');
 
   // Initial redirect on auth change
@@ -79,27 +88,56 @@ export const App: React.FC = () => {
       setCurrentView('host_portal');
       return;
     }
-    socket.emit('join_room', { roomCode: pendingRoomCode, isSpectator: false });
-  }, [pendingRoomCode, isAuthenticated, isHost, isLoading, inviteAuthPrompted, socket]);
+    socket.emit('join_room', { roomCode: pendingRoomCode, isSpectator: pendingSpectator });
+  }, [pendingRoomCode, pendingSpectator, isAuthenticated, isHost, isLoading, inviteAuthPrompted, socket]);
 
   // Socket.IO Multiplayer Lifecycle Listeners
   useEffect(() => {
-    socket.on('room_joined', ({ room, isHost }) => {
-      setActiveRoom(room);
-      setIsRoomHost(isHost);
-      setCurrentView('lobby');
+    socket.on('latency_probe', ({ nonce }) => {
+      socket.emit('latency_pong', { nonce });
     });
 
-    socket.on('room_players_updated', ({ players }) => {
+    socket.on('room_joined', ({ room, isHost, isSpectator, recovery }) => {
+      setActiveRoom(room);
+      setIsRoomHost(isHost);
+      setIsRoomSpectator(isSpectator);
+      sessionStorage.setItem('logicrush_room_code', room.code);
+      sessionStorage.setItem('logicrush_room_spectator', String(isSpectator));
+      if (recovery?.status === 'question' && recovery.question) {
+        setCurrentPublicQuestion({
+          ...recovery.question,
+          receivedAt: performance.now()
+        });
+        setQuestionAlreadyAnswered(recovery.answered === true);
+        setRoundState('question');
+        setCurrentView('game');
+      } else if (recovery?.status === 'round_review' && recovery.result) {
+        setRoundResult(recovery.result);
+        setRoundState('round_review');
+        setCurrentView('game');
+      } else if (recovery?.status === 'finished') {
+        setFinalPodium(recovery.podium || []);
+        setFinalLeaderboard(recovery.leaderboard || []);
+        setFinalTeamLeaderboard(recovery.teamLeaderboard || []);
+        setFinalTotalQuestions(recovery.totalQuestions || 10);
+        setCurrentView('podium');
+      } else {
+        setCurrentView('lobby');
+      }
+    });
+
+    socket.on('room_players_updated', ({ players, spectatorsCount: nextSpectatorsCount }) => {
       setRoomPlayers(players || []);
+      setSpectatorsCount(nextSpectatorsCount || 0);
     });
 
     socket.on('game_starting', ({ countdownSec, totalQuestions }) => {
       sound.playTick();
     });
 
-    socket.on('round_started', ({ question, timeLimitSec }) => {
-      setCurrentPublicQuestion(question);
+    socket.on('round_started', ({ question, remainingTimeMs }) => {
+      setCurrentPublicQuestion({ ...question, remainingTimeMs, receivedAt: performance.now() });
+      setQuestionAlreadyAnswered(false);
       setRoundState('question');
       setRoundResult(null);
       setAnsweredCount(0);
@@ -116,9 +154,10 @@ export const App: React.FC = () => {
       sound.playTick();
     });
 
-    socket.on('game_finished', ({ podium, leaderboard, totalQuestions }) => {
+    socket.on('game_finished', ({ podium, leaderboard, teamLeaderboard, totalQuestions }) => {
       setFinalPodium(podium || []);
       setFinalLeaderboard(leaderboard || []);
+      setFinalTeamLeaderboard(teamLeaderboard || []);
       setFinalTotalQuestions(totalQuestions || 10);
       setCurrentView('podium');
     });
@@ -129,6 +168,7 @@ export const App: React.FC = () => {
 
     return () => {
       socket.off('room_joined');
+      socket.off('latency_probe');
       socket.off('room_players_updated');
       socket.off('game_starting');
       socket.off('round_started');
@@ -160,57 +200,26 @@ export const App: React.FC = () => {
     modeStyle?: string;
   }) => {
     try {
-      const difficulty = ['easy', 'medium', 'hard', 'mixed'].includes(config.difficulty)
-        ? config.difficulty
-        : 'mixed';
-      const targetCount = Math.max(1, Math.floor(config.questionCount));
+      setDailyChallengeId(null);
       const selectedTopics = config.selectedTopics.includes('mixed')
         ? []
         : config.selectedTopics;
-      const questionsByKey = new Map<string, Question>();
-      let usedExpandedPool = false;
-      const addQuestions = (questions: Question[] = []) => {
-        for (const question of questions) {
-          const key = question.id || question.statement;
-          if (!questionsByKey.has(key)) questionsByKey.set(key, question);
-        }
-      };
-      const loadQuestions = async (topics?: string[], filterDifficulty?: string) => {
-        const topicId = topics?.length === 1 ? topics[0] : undefined;
-        const topicFilters = topics && topics.length > 1 ? topics : undefined;
-        const response = await api.getQuestions(topicId, filterDifficulty, 50, topicFilters);
-        addQuestions(response.questions || []);
-      };
-
-      const selectedDifficulty = difficulty === 'mixed' ? undefined : difficulty;
-      await loadQuestions(selectedTopics, selectedDifficulty);
-      if (questionsByKey.size < targetCount && selectedDifficulty) {
-        await loadQuestions(selectedTopics);
-      }
-      if (questionsByKey.size < targetCount) {
-        usedExpandedPool = true;
-        await loadQuestions(undefined, selectedDifficulty);
-      }
-      if (questionsByKey.size < targetCount) {
-        await loadQuestions();
-      }
-
-      const questionsToUse = [...questionsByKey.values()].slice(0, targetCount).map((q) => ({
+      const difficulty = ['easy', 'medium', 'hard', 'mixed'].includes(config.difficulty) ? config.difficulty : 'mixed';
+      const session = await api.startPracticeSession({
+        topics: selectedTopics,
+        difficulty,
+        question_count: Math.max(1, Math.floor(config.questionCount))
+      });
+      const questionsToUse = (session.questions as Question[]).map((q) => ({
         ...q,
         solving_time_sec: config.timePerQuestion
       }));
-
-      if (questionsToUse.length < targetCount) {
-        alert(`Only ${questionsToUse.length} unique questions are available right now. Please choose a smaller question count.`);
-        return;
-      }
-
+      setPracticeSessionId(session.session_id);
       setSoloQuestions(questionsToUse);
       const topicLabel = config.selectedTopics.includes('mixed') || config.selectedTopics.length === 0
         ? 'MIXED'
         : config.selectedTopics.join(', ').toUpperCase();
-      const poolLabel = usedExpandedPool ? ' • Expanded question pool' : '';
-      setSoloTitle(`Custom Sprint: ${topicLabel} (${difficulty.toUpperCase()})${poolLabel}`);
+      setSoloTitle(`Custom Sprint: ${topicLabel} (${difficulty.toUpperCase()})`);
       setSoloModalOpen(true);
     } catch (err) {
       console.error('Failed to load custom quiz questions:', err);
@@ -289,7 +298,12 @@ export const App: React.FC = () => {
 
   // Handler: Leave Current Room
   const handleLeaveRoom = () => {
+    socket.emit('leave_room');
+    sessionStorage.removeItem('logicrush_room_code');
+    sessionStorage.removeItem('logicrush_room_spectator');
     setActiveRoom(null);
+    setIsRoomSpectator(false);
+    setIsRoomHost(false);
     setCurrentView('dashboard');
   };
 
@@ -352,6 +366,8 @@ export const App: React.FC = () => {
             room={activeRoom}
             players={roomPlayers}
             isHost={isRoomHost}
+            isSpectator={isRoomSpectator}
+            spectatorsCount={spectatorsCount}
             onStartGame={handleHostStartGame}
             onLeaveRoom={handleLeaveRoom}
           />
@@ -366,6 +382,8 @@ export const App: React.FC = () => {
             answeredCount={answeredCount}
             totalPlayers={roomPlayers.length}
             isHost={isRoomHost}
+            isSpectator={isRoomSpectator}
+            hasSubmittedInitially={questionAlreadyAnswered}
             onNextRound={handleNextRound}
           />
         )}
@@ -375,6 +393,7 @@ export const App: React.FC = () => {
           <PodiumResultsScreen
             podium={finalPodium}
             leaderboard={finalLeaderboard}
+            teamLeaderboard={finalTeamLeaderboard}
             totalQuestions={finalTotalQuestions}
             topic={activeRoom?.topicId}
             roomTitle={activeRoom?.title}
@@ -402,8 +421,14 @@ export const App: React.FC = () => {
         {currentView === 'leagues' && (
           <SocialLeaguesView
             onStartDailyChallenge={async () => {
+              if (!isAuthenticated) {
+                handleOpenAuth('student');
+                return;
+              }
               const res = await api.getDailyChallenge();
               if (res.challenge?.questions) {
+                setDailyChallengeId(res.challenge.id);
+                setPracticeSessionId(null);
                 setSoloQuestions(res.challenge.questions);
                 setSoloTitle(res.challenge.title);
                 setSoloModalOpen(true);
@@ -434,9 +459,15 @@ export const App: React.FC = () => {
 
       <SoloPracticeModal
         isOpen={soloModalOpen}
-        onClose={() => setSoloModalOpen(false)}
         questions={soloQuestions}
         title={soloTitle}
+        dailyChallengeId={dailyChallengeId}
+        practiceSessionId={practiceSessionId}
+        onClose={() => {
+          setSoloModalOpen(false);
+          setDailyChallengeId(null);
+          setPracticeSessionId(null);
+        }}
       />
 
     </div>
