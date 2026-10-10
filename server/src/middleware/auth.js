@@ -12,6 +12,24 @@ export function generateToken(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
 }
 
+export function verifyToken(token) {
+  return jwt.verify(token, JWT_SECRET);
+}
+
+export function authenticateSocket(socket, next) {
+  const token = socket.handshake.auth?.token;
+  if (typeof token !== 'string' || !token) {
+    return next(new Error('Authentication required.'));
+  }
+
+  try {
+    socket.data.user = verifyToken(token);
+    next();
+  } catch {
+    next(new Error('Invalid or expired authentication token.'));
+  }
+}
+
 export function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -20,7 +38,7 @@ export function authenticate(req, res, next) {
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = verifyToken(token);
     req.user = decoded;
     next();
   } catch (err) {

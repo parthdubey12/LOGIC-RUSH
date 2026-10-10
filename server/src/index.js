@@ -1,10 +1,8 @@
+import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
 import { initDb } from './db/db.js';
 import { seedDbIfEmpty } from './routes/questionRoutes.js';
@@ -14,11 +12,7 @@ import roomRoutes from './routes/roomRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
 import socialRoutes from './routes/socialRoutes.js';
 import { setupGameSocket } from './socket/gameServer.js';
-
-dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { authenticateSocket } from './middleware/auth.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -29,17 +23,21 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:3000',
-  process.env.CLIENT_URL
+  ...(process.env.CLIENT_URL || '').split(',').map(origin => origin.trim())
 ].filter(Boolean);
+
+if (process.env.NODE_ENV === 'production' && !(process.env.CLIENT_URL || '').trim()) {
+  throw new Error('CLIENT_URL must include the production frontend origin.');
+}
+
+const isAllowedOrigin = origin => (
+  !origin || process.env.NODE_ENV !== 'production' || allowedOrigins.includes(origin)
+);
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl) or matching origins
-    if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
-      callback(null, true);
-    } else {
-      callback(null, true); // Permissive in dev
-    }
+    if (isAllowedOrigin(origin)) callback(null, true);
+    else callback(new Error('Origin is not allowed by CORS.'));
   },
   credentials: true
 }));
@@ -50,11 +48,17 @@ app.use(express.urlencoded({ extended: true }));
 // Socket.IO Setup
 const io = new SocketIOServer(server, {
   cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) callback(null, true);
+      else callback(new Error('Origin is not allowed by CORS.'));
+    },
+    methods: ['GET', 'POST'],
+    credentials: true
   },
   transports: ['websocket', 'polling']
 });
+
+io.use(authenticateSocket);
 
 // Setup Real-time Game Engine
 setupGameSocket(io);

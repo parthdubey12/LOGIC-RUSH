@@ -43,15 +43,6 @@ export const api = {
     return res.json();
   },
 
-  async resetPassword(data: any) {
-    const res = await fetch(`${API_BASE_URL}/auth/reset-password`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-    return res.json();
-  },
-
   // Questions & Topics
   async getTopics() {
     const res = await fetch(`${API_BASE_URL}/questions/topics`);

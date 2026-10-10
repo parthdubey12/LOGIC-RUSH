@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, UserProfile } from '../types';
 import { api } from '../services/api';
+import { setSocketAuthToken } from '../services/socket';
 
 interface AuthContextType {
   user: User | null;
@@ -28,12 +29,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshUser = async () => {
     const token = localStorage.getItem('logicrush_token');
     if (!token) {
+      setSocketAuthToken(null);
       setUser(null);
       setProfile(null);
       setIsLoading(false);
       return;
     }
 
+    setSocketAuthToken(token);
     try {
       const data = await api.getMe();
       if (data.user) {
@@ -41,6 +44,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProfile(data.user.profile || null);
       } else {
         localStorage.removeItem('logicrush_token');
+        setSocketAuthToken(null);
         setUser(null);
         setProfile(null);
       }
@@ -59,6 +63,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const res = await api.login(credentials);
     if (res.token && res.user) {
       localStorage.setItem('logicrush_token', res.token);
+      setSocketAuthToken(res.token);
       setUser(res.user);
       setProfile(res.user.profile);
     }
@@ -69,6 +74,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const res = await api.register(userData);
     if (res.token && res.user) {
       localStorage.setItem('logicrush_token', res.token);
+      setSocketAuthToken(res.token);
       setUser(res.user);
       setProfile(res.user.profile);
     }
@@ -79,6 +85,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const res = await api.guestLogin();
     if (res.token && res.user) {
       localStorage.setItem('logicrush_token', res.token);
+      setSocketAuthToken(res.token);
       setUser(res.user);
       setProfile(res.user.profile);
     }
@@ -87,6 +94,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = () => {
     localStorage.removeItem('logicrush_token');
+    setSocketAuthToken(null);
     setUser(null);
     setProfile(null);
   };

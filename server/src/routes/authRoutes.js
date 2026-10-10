@@ -9,13 +9,30 @@ const router = express.Router();
 // Register User
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, name, role = 'student', college = 'LogicRush Institute', course = 'Computer Science', year = '3rd Year', avatar = '⚡' } = req.body;
+    const { email, password, name, role = 'student', college = 'LogicRush Institute', course = 'Computer Science', year = '3rd Year', avatar = '⚡' } = req.body || {};
 
-    if (!email || !password || !name) {
+    if (typeof email !== 'string' || typeof password !== 'string' || typeof name !== 'string' || !email.trim() || !password || !name.trim()) {
       return res.status(400).json({ error: 'Email, password, and name are required.' });
     }
 
-    const existing = await queryOne('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+    if (password.length < 8 || Buffer.byteLength(password, 'utf8') > 72) {
+      return res.status(400).json({ error: 'Password must be between 8 and 72 bytes.' });
+    }
+
+    if (name.trim().length > 128 || email.trim().length > 255) {
+      return res.status(400).json({ error: 'Name or email is too long.' });
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return res.status(400).json({ error: 'Enter a valid email address.' });
+    }
+
+    if (role !== 'student' && role !== 'host') {
+      return res.status(400).json({ error: 'Role must be student or host.' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const existing = await queryOne('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
     if (existing) {
       return res.status(400).json({ error: 'An account with this email already exists.' });
     }
@@ -26,7 +43,7 @@ router.post('/register', async (req, res) => {
     // Insert user
     await query('INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, $3, $4)', [
       userId,
-      email.toLowerCase().trim(),
+      normalizedEmail,
       hashedPassword,
       role
     ]);
@@ -42,14 +59,14 @@ router.post('/register', async (req, res) => {
       avatar
     ]);
 
-    const token = generateToken({ id: userId, email: email.toLowerCase().trim(), role, name });
+    const token = generateToken({ id: userId, email:     normalizedEmail, role, name });
 
     return res.status(201).json({
       message: 'Account created successfully!',
       token,
       user: {
         id: userId,
-        email: email.toLowerCase().trim(),
+        email: normalizedEmail,
         role,
         profile: { name, college, course, year, avatar, xp: 100, level: 1, streak: 1, accuracy: 85.0 }
       }
@@ -63,12 +80,13 @@ router.post('/register', async (req, res) => {
 // Login User
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) {
+    const { email, password } = req.body || {};
+    if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
-    const user = await queryOne('SELECT * FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await queryOne('SELECT * FROM users WHERE email = $1', [normalizedEmail]);
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
@@ -151,24 +169,6 @@ router.get('/me', authenticate, async (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: 'Failed to fetch user profile.' });
   }
-});
-
-// Reset Password Flow
-router.post('/reset-password', async (req, res) => {
-  const { email, newPassword } = req.body;
-  if (!email || !newPassword) {
-    return res.status(400).json({ error: 'Email and new password required.' });
-  }
-
-  const user = await queryOne('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
-  if (!user) {
-    return res.status(404).json({ error: 'User not found.' });
-  }
-
-  const hashedPassword = await bcrypt.hash(newPassword, 10);
-  await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashedPassword, user.id]);
-
-  return res.json({ message: 'Password reset successfully! Please login with your new password.' });
 });
 
 export default router;

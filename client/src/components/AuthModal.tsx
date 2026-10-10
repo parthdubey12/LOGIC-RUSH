@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { API_BASE_URL } from '../services/api';
 import {
   X,
   Zap,
@@ -12,8 +11,7 @@ import {
   Calendar,
   Sparkles,
   ShieldCheck,
-  Gamepad2,
-  KeyRound
+  Gamepad2
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -44,10 +42,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [course, setCourse] = useState('Computer Science & Engineering');
   const [year, setYear] = useState('3rd Year');
   const [avatar, setAvatar] = useState('⚡');
-  const [newPassword, setNewPassword] = useState('');
 
   const [errorMessage, setErrorMessage] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -55,9 +51,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setActiveTab('login');
     setRole(defaultRole);
     setErrorMessage('');
-    setSuccessMessage('');
     setPassword('');
-    setNewPassword('');
   }, [isOpen, defaultRole]);
 
   if (!isOpen) return null;
@@ -65,7 +59,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
-    setSuccessMessage('');
     setIsSubmitting(true);
 
     try {
@@ -93,20 +86,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         } else {
           onClose();
           onSuccess?.();
-        }
-      } else if (activeTab === 'forgot') {
-        // Reset password flow
-        const res = await fetch(`${API_BASE_URL}/auth/reset-password`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, newPassword })
-        }).then(r => r.json());
-
-        if (res.error) {
-          setErrorMessage(res.error);
-        } else {
-          setSuccessMessage(res.message || 'Password reset successfully! Please log in.');
-          setActiveTab('login');
         }
       }
     } catch (err: any) {
@@ -193,9 +172,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {errorMessage}
           </div>
         )}
-        {successMessage && (
-          <div className="p-3 mb-4 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs font-semibold">
-            {successMessage}
+        {activeTab === 'forgot' && (
+          <div className="p-3 mb-4 rounded-xl bg-amber-950/50 border border-amber-500/30 text-amber-200 text-xs font-semibold">
+            Secure password recovery is not configured yet. Please contact your administrator.
           </div>
         )}
 
@@ -315,26 +294,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           )}
 
-          {/* New Password for Forgot Flow */}
+          {/* Password reset is unavailable until verified email delivery is configured. */}
           {activeTab === 'forgot' && (
-            <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1">New Password</label>
-              <div className="relative">
-                <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-3.5" />
-                <input
-                  type="password"
-                  required
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Enter new password"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-10 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500 transition-colors"
-                />
-              </div>
-            </div>
+            <p className="text-xs text-slate-400">
+              Password reset is not available yet. Please contact your administrator.
+            </p>
           )}
 
           {/* Submit Button */}
-          <button
+          {activeTab !== 'forgot' && <button
             type="submit"
             disabled={isSubmitting}
             className={`w-full py-3 rounded-xl font-bold text-sm text-white shadow-lg transition-all ${
@@ -349,8 +317,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               ? `Enter Arena as ${role === 'host' ? 'Host' : 'Student'}`
               : activeTab === 'register'
               ? 'Create LogicRush Account'
-              : 'Update Password'}
+              : ''}
           </button>
+          }
         </form>
 
         {/* Divider & Guest Play Mode */}

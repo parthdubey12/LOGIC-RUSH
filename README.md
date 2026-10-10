@@ -37,12 +37,14 @@ npm run simulate-50    # Simulates 50 live players answering questions against t
 ### 5. Deploying
 The React/Vite client can be deployed to Vercel with the project root set to `client`. Vercel uses `client/vercel.json` for SPA route fallback.
 
-The Express API and Socket.IO game server require a persistent Node.js host; Socket.IO multiplayer is not supported by Vercel serverless functions. Deploy `server` on a WebSocket-capable host and attach a persistent PostgreSQL database by setting `DATABASE_URL`. Configure these Vercel environment variables for the client:
+The Express API and Socket.IO game server require a persistent Node.js host; Socket.IO multiplayer is not supported by Vercel serverless functions. Deploy `server` on a WebSocket-capable host with a persistent PostgreSQL database. Set `NODE_ENV=production`, `DATABASE_URL`, a unique high-entropy `JWT_SECRET`, and `CLIENT_URL` (the exact Vercel frontend origin) on the backend. The active multiplayer rooms are held in server memory, so run one backend instance unless a shared Socket.IO adapter and shared game-state store are added.
+
+Configure these Vercel environment variables for the client, then redeploy the frontend:
 
 - `VITE_API_URL`: backend URL ending in `/api` (for example `https://api.example.com/api`)
 - `VITE_SOCKET_URL`: backend origin (for example `https://api.example.com`)
 
-Set `JWT_SECRET` to a unique, high-entropy value in the backend host's environment. Do not commit `.env` files, credentials, or database files.
+Do not commit `.env` files, credentials, or database files. Production mode refuses to start without `DATABASE_URL`, `JWT_SECRET`, and `CLIENT_URL`. Secure password recovery is not enabled until verified email delivery is configured.
 
 ---
 

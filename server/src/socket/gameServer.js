@@ -14,30 +14,35 @@ export function setupGameSocket(io) {
     let currentUserId = null;
 
     // 1. Join Room
-    socket.on('join_room', async ({ roomCode, user, isHost = false, isSpectator = false }) => {
+    socket.on('join_room', async ({ roomCode, isSpectator = false } = {}) => {
       try {
         const code = (roomCode || '').toUpperCase().trim();
+        const currentUser = socket.data.user;
+        if (!code || !currentUser?.id) {
+          return socket.emit('error_message', { message: 'A valid room code and login are required.' });
+        }
+
+        const dbRoom = await queryOne('SELECT * FROM rooms WHERE code = $1', [code]);
+        if (!dbRoom) {
+          return socket.emit('error_message', { message: `Room ${code} not found.` });
+        }
+
         let room = activeRooms.get(code);
 
-        // If room not in memory, check DB or create if host
+        // Rebuild the in-memory lobby from its persisted room record.
         if (!room) {
-          const dbRoom = await queryOne('SELECT * FROM rooms WHERE code = $1', [code]);
-          if (!dbRoom && !isHost) {
-            return socket.emit('error_message', { message: `Room ${code} not found.` });
-          }
-
           room = {
-            id: dbRoom ? dbRoom.id : ('room_' + code),
+            id: dbRoom.id,
             code: code,
-            hostId: dbRoom ? dbRoom.host_id : (user?.id || 'host_user'),
-            hostSocketId: isHost ? socket.id : null,
-            title: dbRoom ? dbRoom.title : 'LogicRush Live Match',
-            topicId: dbRoom ? (dbRoom.topic_id || 'mixed') : 'mixed',
-            difficulty: dbRoom ? (dbRoom.difficulty || 'medium') : 'medium',
-            questionCount: dbRoom ? (dbRoom.question_count || 10) : 10,
-            timePerQuestion: dbRoom ? (dbRoom.time_per_question || 20) : 20,
-            powerupsEnabled: dbRoom ? (dbRoom.powerups_enabled !== 0) : true,
-            status: dbRoom ? (dbRoom.status || 'waiting') : 'waiting',
+            hostId: dbRoom.host_id,
+            hostSocketId: null,
+            title: dbRoom.title,
+            topicId: dbRoom.topic_id || 'mixed',
+            difficulty: dbRoom.difficulty || 'medium',
+            questionCount: dbRoom.question_count || 10,
+            timePerQuestion: dbRoom.time_per_question || 20,
+            powerupsEnabled: dbRoom.powerups_enabled !== 0 && dbRoom.powerups_enabled !== false,
+            status: dbRoom.status || 'waiting',
             currentQuestionIndex: 0,
             questions: [],
             players: new Map(), // socketId -> playerData
@@ -49,8 +54,23 @@ export function setupGameSocket(io) {
           activeRooms.set(code, room);
         }
 
+        const isHost = dbRoom.host_id === currentUser.id;
+        const isPlayerSpectator = isSpectator === true;
+        currentUserId = currentUser.id;
+        const existingPlayer = Array.from(room.players.values()).find(p => p.userId === currentUserId);
+        if (!existingPlayer && !isPlayerSpectator && room.players.size >= (dbRoom.max_players || 50)) {
+          return socket.emit('error_message', { message: 'This room has reached its player limit.' });
+        }
+
+        if (existingPlayer) {
+          const previousSocket = io.sockets.sockets.get(existingPlayer.socketId);
+          if (previousSocket && previousSocket.id !== socket.id) {
+            previousSocket.leave(code);
+          }
+          room.players.delete(existingPlayer.socketId);
+        }
+
         currentRoomCode = code;
-        currentUserId = user?.id || socket.id;
 
         socket.join(code);
 
@@ -58,33 +78,33 @@ export function setupGameSocket(io) {
           room.hostSocketId = socket.id;
         }
 
-        // Add / Update player
-        const existingPlayer = Array.from(room.players.values()).find(p => p.userId === currentUserId);
-        const playerData = existingPlayer || {
+        const profile = currentUser.isGuest
+          ? null
+          : await queryOne('SELECT name, avatar, college FROM user_profiles WHERE user_id = $1', [currentUserId]);
+        const playerData = {
           socketId: socket.id,
           userId: currentUserId,
-          name: user?.name || user?.profile?.name || (isSpectator ? 'Spectator' : 'Player ' + socket.id.substring(0, 4)),
-          avatar: user?.avatar || user?.profile?.avatar || '⚡',
-          college: user?.college || user?.profile?.college || 'Campus Arena',
+          name: profile?.name || currentUser.name || `Player ${socket.id.substring(0, 4)}`,
+          avatar: profile?.avatar || '⚡',
+          college: profile?.college || 'Campus Arena',
           score: 0,
           streak: 0,
           correctCount: 0,
-          isReady: isHost ? true : false,
+          isReady: isHost,
           isHost,
-          isSpectator,
+          isSpectator: isPlayerSpectator,
           isDisqualified: false,
           tabViolations: 0,
           powerups: { fiftyFifty: 1, doublePoints: 1, extraTime: 1, hintCard: 1, streakShield: 1 }
         };
 
-        playerData.socketId = socket.id;
         room.players.set(socket.id, playerData);
 
         // Emit room state to joining player
         socket.emit('room_joined', {
           room: serializeRoom(room),
           player: playerData,
-          isHost: room.hostId === currentUserId || isHost
+          isHost
         });
 
         // Broadcast player list update to room
@@ -414,7 +434,7 @@ export function setupGameSocket(io) {
     socket.on('next_round', () => {
       if (!currentRoomCode) return;
       const room = activeRooms.get(currentRoomCode);
-      if (!room || room.status !== 'round_review') return;
+      if (!room || room.hostSocketId !== socket.id || room.status !== 'round_review') return;
 
       room.currentQuestionIndex += 1;
       if (room.currentQuestionIndex < room.questions.length) {

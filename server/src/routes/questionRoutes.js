@@ -8,35 +8,40 @@ const router = express.Router();
 
 // Seed initial topics and questions into database if empty or reseed
 export async function seedDbIfEmpty() {
-  try {
-    const existingTopics = await query('SELECT COUNT(*) as count FROM question_topics');
-    const topicCount = parseInt(existingTopics[0]?.count || 0);
+  const existingTopics = await query('SELECT COUNT(*) as count FROM question_topics');
+  const topicCount = parseInt(existingTopics[0]?.count || 0);
 
-    if (topicCount === 0) {
-      console.log('🌱 Seeding default topics...');
-      for (const t of defaultTopics) {
-        await query(
-          'INSERT INTO question_topics (id, name, description, category, icon) VALUES ($1, $2, $3, $4, $5)',
-          [t.id, t.name, t.description, t.category, t.icon]
-        );
-      }
+  if (topicCount === 0) {
+    console.log('🌱 Seeding default topics...');
+    for (const t of defaultTopics) {
+      await query(
+        'INSERT INTO question_topics (id, name, description, category, icon) VALUES ($1, $2, $3, $4, $5)',
+        [t.id, t.name, t.description, t.category, t.icon]
+      );
     }
+  }
 
-    const existingQs = await query('SELECT COUNT(*) as count FROM questions');
-    const qCount = parseInt(existingQs[0]?.count || 0);
+  const existingQs = await query('SELECT COUNT(*) as count FROM questions');
+  const qCount = parseInt(existingQs[0]?.count || 0);
 
-    if (qCount < seedQuestions.length) {
-      console.log('🌱 Seeding full aptitude question repository...');
-      for (const q of seedQuestions) {
-        await query(
-          `INSERT OR REPLACE INTO questions (id, topic_id, statement, options, correct_option, explanation, difficulty, solving_time_sec, tags)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [q.id, q.topic_id, q.statement, q.options, q.correct_option, q.explanation, q.difficulty, q.solving_time_sec, q.tags]
-        ).catch(() => {});
-      }
+  if (qCount < seedQuestions.length) {
+    console.log('🌱 Seeding full aptitude question repository...');
+    for (const q of seedQuestions) {
+      await query(
+        `INSERT INTO questions (id, topic_id, statement, options, correct_option, explanation, difficulty, solving_time_sec, tags)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (id) DO UPDATE SET
+           topic_id = EXCLUDED.topic_id,
+           statement = EXCLUDED.statement,
+           options = EXCLUDED.options,
+           correct_option = EXCLUDED.correct_option,
+           explanation = EXCLUDED.explanation,
+           difficulty = EXCLUDED.difficulty,
+           solving_time_sec = EXCLUDED.solving_time_sec,
+           tags = EXCLUDED.tags`,
+        [q.id, q.topic_id, q.statement, q.options, q.correct_option, q.explanation, q.difficulty, q.solving_time_sec, q.tags]
+      );
     }
-  } catch (err) {
-    console.error('Error seeding database:', err);
   }
 }
 

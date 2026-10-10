@@ -59,7 +59,7 @@ export const App: React.FC = () => {
 
   // Socket.IO Multiplayer Lifecycle Listeners
   useEffect(() => {
-    socket.on('room_joined', ({ room, player, isHost }) => {
+    socket.on('room_joined', ({ room, isHost }) => {
       setActiveRoom(room);
       setIsRoomHost(isHost);
       setCurrentView('lobby');
@@ -202,13 +202,7 @@ export const App: React.FC = () => {
 
     socket.emit('join_room', {
       roomCode: code,
-      user: {
-        id: user?.id,
-        name: profile?.name || user?.email?.split('@')[0],
-        avatar: profile?.avatar || '⚡',
-        college: profile?.college || 'Campus Arena'
-      },
-      isHost: false
+      isSpectator: false
     });
   };
 
@@ -224,13 +218,7 @@ export const App: React.FC = () => {
       if (res.room) {
         socket.emit('join_room', {
           roomCode: res.room.code,
-          user: {
-            id: user?.id,
-            name: profile?.name || 'Host Commander',
-            avatar: profile?.avatar || '👑',
-            college: profile?.college || 'Host Control'
-          },
-          isHost: true
+          isSpectator: false
         });
       }
     } catch (err) {

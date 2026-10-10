@@ -13,6 +13,10 @@ let sqliteDb = null;
 
 const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
 
+if (process.env.NODE_ENV === 'production' && !connectionString) {
+  throw new Error('DATABASE_URL must be set in production; SQLite storage is ephemeral on hosted services.');
+}
+
 if (connectionString) {
   console.log('🔗 Connecting to PostgreSQL database...');
   pgPool = new pg.Pool({ connectionString, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
@@ -60,18 +64,11 @@ export async function queryOne(sql, params = []) {
 
 export async function initDb() {
   if (isPg) {
-    console.log('✅ PostgreSQL connected.');
-    // Check if schema needs to be executed
-    try {
-      const schemaPath = path.join(__dirname, 'schema.sql');
-      if (fs.existsSync(schemaPath)) {
-        const schemaSql = fs.readFileSync(schemaPath, 'utf8');
-        await pgPool.query(schemaSql);
-        console.log('✅ PostgreSQL schema verified.');
-      }
-    } catch (e) {
-      console.warn('PostgreSQL schema auto-apply warning:', e.message);
-    }
+    await pgPool.query('SELECT 1');
+    const schemaPath = path.join(__dirname, 'schema.sql');
+    const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+    await pgPool.query(schemaSql);
+    console.log('✅ PostgreSQL schema verified.');
     return;
   }
 

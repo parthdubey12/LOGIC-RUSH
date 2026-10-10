@@ -1,8 +1,5 @@
 -- LogicRush PostgreSQL Database Schema Definition
 
--- Enable UUID extension if supported
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(64) PRIMARY KEY,

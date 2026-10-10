@@ -45,7 +45,7 @@ router.post('/create', authenticate, async (req, res) => {
         Math.min(max_players || 50, 50),
         question_count || 10,
         time_per_question || 20,
-        powerups_enabled ? 1 : 0,
+        Boolean(powerups_enabled),
         JSON.stringify(scoring_rules || {})
       ]
     );
