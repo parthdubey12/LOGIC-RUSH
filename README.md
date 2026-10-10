@@ -24,7 +24,7 @@ npm start              # Starts Node.js + Express + Socket.IO server on port 400
 ```bash
 cd client
 npm install
-npm run dev            # Starts Vite development server on http://localhost:5173
+npm run dev            # Open http://localhost:5173 (API and Socket.IO are proxied to port 4000)
 npm run build          # Builds production bundle
 ```
 
