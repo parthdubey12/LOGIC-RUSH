@@ -1,0 +1,17 @@
+node_modules/
+**/node_modules/
+
+client/dist/
+server/src/db/*.sqlite
+server/src/db/*.sqlite-*
+server/src/db/*.db
+
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+.vercel/
+*.log

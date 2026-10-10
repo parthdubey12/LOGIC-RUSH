@@ -1,0 +1,298 @@
+import pg from 'pg';
+import sqlite3 from 'sqlite3';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+let isPg = false;
+let pgPool = null;
+let sqliteDb = null;
+
+const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+
+if (connectionString) {
+  console.log('🔗 Connecting to PostgreSQL database...');
+  pgPool = new pg.Pool({ connectionString, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
+  isPg = true;
+} else {
+  console.log('💾 DATABASE_URL not set. Initializing local SQLite database...');
+  const dbPath = path.join(__dirname, 'logicrush_local.sqlite');
+  sqliteDb = new sqlite3.Database(dbPath);
+}
+
+// Convert PostgreSQL $1, $2 params to SQLite ? params if using SQLite
+function adaptSql(sql) {
+  if (isPg) return sql;
+  return sql.replace(/\$\d+/g, '?');
+}
+
+export async function query(sql, params = []) {
+  const adaptedSql = adaptSql(sql);
+
+  if (isPg) {
+    const res = await pgPool.query(adaptedSql, params);
+    return res.rows;
+  } else {
+    return new Promise((resolve, reject) => {
+      const trimmed = adaptedSql.trim().toUpperCase();
+      if (trimmed.startsWith('SELECT') || trimmed.startsWith('PRAGMA')) {
+        sqliteDb.all(adaptedSql, params, (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        });
+      } else {
+        sqliteDb.run(adaptedSql, params, function (err) {
+          if (err) reject(err);
+          else resolve([{ changes: this.changes, lastID: this.lastID }]);
+        });
+      }
+    });
+  }
+}
+
+export async function queryOne(sql, params = []) {
+  const rows = await query(sql, params);
+  return rows[0] || null;
+}
+
+export async function initDb() {
+  if (isPg) {
+    console.log('✅ PostgreSQL connected.');
+    // Check if schema needs to be executed
+    try {
+      const schemaPath = path.join(__dirname, 'schema.sql');
+      if (fs.existsSync(schemaPath)) {
+        const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+        await pgPool.query(schemaSql);
+        console.log('✅ PostgreSQL schema verified.');
+      }
+    } catch (e) {
+      console.warn('PostgreSQL schema auto-apply warning:', e.message);
+    }
+    return;
+  }
+
+  // Helper for SQLite schema creation
+  const runAsync = (sql) => new Promise((res, rej) => sqliteDb.run(sql, (err) => err ? rej(err) : res()));
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'student',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    college TEXT DEFAULT 'LogicRush University',
+    course TEXT DEFAULT 'Computer Science & Engineering',
+    year TEXT DEFAULT '3rd Year',
+    avatar TEXT DEFAULT '⚡',
+    xp INTEGER DEFAULT 0,
+    level INTEGER DEFAULT 1,
+    streak INTEGER DEFAULT 0,
+    total_games INTEGER DEFAULT 0,
+    total_correct INTEGER DEFAULT 0,
+    total_questions INTEGER DEFAULT 0,
+    accuracy REAL DEFAULT 0.00,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS colleges (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    location TEXT,
+    code TEXT UNIQUE NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS college_memberships (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    college_id TEXT,
+    role TEXT DEFAULT 'student',
+    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS question_topics (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT,
+    category TEXT DEFAULT 'General Aptitude',
+    icon TEXT DEFAULT 'Brain'
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS questions (
+    id TEXT PRIMARY KEY,
+    topic_id TEXT,
+    statement TEXT NOT NULL,
+    options TEXT NOT NULL,
+    correct_option INTEGER NOT NULL,
+    explanation TEXT,
+    difficulty TEXT DEFAULT 'medium',
+    solving_time_sec INTEGER DEFAULT 30,
+    tags TEXT,
+    author_id TEXT,
+    image_url TEXT,
+    usage_count INTEGER DEFAULT 0,
+    correct_count INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS question_sets (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    created_by TEXT,
+    is_public INTEGER DEFAULT 1,
+    topic_id TEXT,
+    difficulty TEXT DEFAULT 'medium',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS rooms (
+    id TEXT PRIMARY KEY,
+    code TEXT UNIQUE NOT NULL,
+    host_id TEXT,
+    title TEXT NOT NULL,
+    topic_id TEXT,
+    difficulty TEXT DEFAULT 'medium',
+    max_players INTEGER DEFAULT 50,
+    question_count INTEGER DEFAULT 10,
+    time_per_question INTEGER DEFAULT 20,
+    powerups_enabled INTEGER DEFAULT 1,
+    scoring_rules TEXT,
+    status TEXT DEFAULT 'waiting',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS room_participants (
+    id TEXT PRIMARY KEY,
+    room_id TEXT,
+    user_id TEXT,
+    score INTEGER DEFAULT 0,
+    rank INTEGER DEFAULT 0,
+    correct_count INTEGER DEFAULT 0,
+    total_time REAL DEFAULT 0,
+    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS matches (
+    id TEXT PRIMARY KEY,
+    room_id TEXT,
+    host_id TEXT,
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ended_at DATETIME,
+    total_questions INTEGER DEFAULT 10,
+    summary TEXT
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS answers (
+    id TEXT PRIMARY KEY,
+    match_id TEXT,
+    question_id TEXT,
+    user_id TEXT,
+    selected_option INTEGER,
+    is_correct INTEGER NOT NULL,
+    response_time_ms INTEGER NOT NULL,
+    points_earned INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS topic_statistics (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    topic_id TEXT,
+    attempts INTEGER DEFAULT 0,
+    correct INTEGER DEFAULT 0,
+    total_time_ms INTEGER DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS achievements (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    badge_icon TEXT DEFAULT 'Trophy',
+    xp_reward INTEGER DEFAULT 100,
+    category TEXT DEFAULT 'General'
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS user_achievements (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    achievement_id TEXT,
+    unlocked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS teams (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    college_id TEXT,
+    captain_id TEXT,
+    total_score INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS team_members (
+    id TEXT PRIMARY KEY,
+    team_id TEXT,
+    user_id TEXT,
+    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS college_leagues (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    season TEXT NOT NULL,
+    start_date DATETIME,
+    end_date DATETIME,
+    status TEXT DEFAULT 'active'
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS league_standings (
+    id TEXT PRIMARY KEY,
+    league_id TEXT,
+    college_id TEXT,
+    points INTEGER DEFAULT 0,
+    rank INTEGER DEFAULT 0,
+    wins INTEGER DEFAULT 0,
+    matches_played INTEGER DEFAULT 0
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS daily_challenges (
+    id TEXT PRIMARY KEY,
+    challenge_date TEXT UNIQUE NOT NULL,
+    title TEXT NOT NULL,
+    topic_id TEXT,
+    question_ids TEXT NOT NULL,
+    xp_reward INTEGER DEFAULT 250,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS challenge_attempts (
+    id TEXT PRIMARY KEY,
+    challenge_id TEXT,
+    user_id TEXT,
+    score INTEGER DEFAULT 0,
+    completed INTEGER DEFAULT 1,
+    attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  await runAsync(`CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    type TEXT DEFAULT 'info',
+    is_read INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );`);
+
+  console.log('✅ SQLite Local Database Initialized.');
+}
